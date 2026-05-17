@@ -1,0 +1,8 @@
+.git
+.github
+node_modules
+.next
+Dockerfile
+README.md
+README.zh-CN.md
+*.log
