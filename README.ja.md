@@ -1,27 +1,27 @@
-# ImgX Studio
+# HC Studio
 
 > デザイナー、マーケティングチーム、AI クリエイター向けのセルフホスト型 GPT Image ワークスペース。gpt-image-2 を、反復可能で納品に使える制作ツールにします。
 
-![ImgX Studio logo](./public/logo.png)
+![HC Studio logo](./public/logo.png)
 
 **Language:** [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Português](./README.pt.md)
 
 ## GPT Image を本格的な制作ワークスペースへ
 
-ImgX Studio は **GPT Image / OpenAI-compatible image API** のためのプレミアム WebUI です。プロンプト作成、参照画像アップロード、サイズと品質の調整、複数案の生成、ベスト画像の選択、選択結果からの再生成まで、1 つの流れで完結します。
+HC Studio は **GPT Image / OpenAI-compatible image API** のためのプレミアム WebUI です。プロンプト作成、参照画像アップロード、サイズと品質の調整、複数案の生成、ベスト画像の選択、選択結果からの再生成まで、1 つの流れで完結します。
 
 ## スクリーンショット
 
 <p align="center">
-  <img src="./public/img.png" alt="ImgX Studio workspace" width="100%">
+  <img src="./public/img.png" alt="HC Studio workspace" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_1.png" alt="ImgX Studio generation controls" width="100%">
+  <img src="./public/img_1.png" alt="HC Studio generation controls" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_2.png" alt="ImgX Studio iteration workflow" width="100%">
+  <img src="./public/img_2.png" alt="HC Studio iteration workflow" width="100%">
 </p>
 
 ## 主な魅力

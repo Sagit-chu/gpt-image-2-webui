@@ -1,27 +1,27 @@
-# ImgX Studio
+# HC Studio
 
 > 面向設計師、行銷團隊與 AI 創作者的自託管 GPT 圖片工作台，讓 gpt-image-2 成為可迭代、可交付的創意生產工具。
 
-![ImgX Studio logo](./public/logo.png)
+![HC Studio logo](./public/logo.png)
 
 **閱讀語言：** [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Português](./README.pt.md)
 
 ## 把 GPT Image 變成真正的創意工作台
 
-ImgX Studio 是一個面向設計師、品牌行銷、獨立開發者與 AI 圖片工作流團隊的 GPT 圖片生成 WebUI。它把 GPT Image / OpenAI-compatible image API 包裝成更順手的視覺化產品：撰寫 prompt、上傳參考圖、選擇尺寸與品質、批量出圖、挑選結果、繼續二創，一條鏈路完成。
+HC Studio 是一個面向設計師、品牌行銷、獨立開發者與 AI 圖片工作流團隊的 GPT 圖片生成 WebUI。它把 GPT Image / OpenAI-compatible image API 包裝成更順手的視覺化產品：撰寫 prompt、上傳參考圖、選擇尺寸與品質、批量出圖、挑選結果、繼續二創，一條鏈路完成。
 
 ## 產品截圖
 
 <p align="center">
-  <img src="./public/img.png" alt="ImgX Studio 工作台" width="100%">
+  <img src="./public/img.png" alt="HC Studio 工作台" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_1.png" alt="ImgX Studio 參數與預覽" width="100%">
+  <img src="./public/img_1.png" alt="HC Studio 參數與預覽" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_2.png" alt="ImgX Studio 迭代工作流" width="100%">
+  <img src="./public/img_2.png" alt="HC Studio 迭代工作流" width="100%">
 </p>
 
 ## 為什麼值得 Star

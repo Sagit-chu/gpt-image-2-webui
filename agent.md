@@ -2,7 +2,7 @@
 
 ## Project
 
-ImgX Studio is a Next.js 16 app with React 19, TypeScript, Tailwind CSS 4, shadcn/ui, Base UI, OpenAI SDK, and Sonner.
+HC Studio is a Next.js 16 app with React 19, TypeScript, Tailwind CSS 4, shadcn/ui, Base UI, OpenAI SDK, and Sonner.
 
 ## Key conventions
 

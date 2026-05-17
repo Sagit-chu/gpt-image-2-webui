@@ -1,27 +1,27 @@
-# ImgX Studio
+# HC Studio
 
 > Ein selbst gehostetes GPT Image Studio für Designer, Marketing-Teams und AI-Creators, die gpt-image-2 in einen produktionsreifen visuellen Workflow verwandeln möchten.
 
-![ImgX Studio logo](./public/logo.png)
+![HC Studio logo](./public/logo.png)
 
 **Sprache:** [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Português](./README.pt.md)
 
 ## GPT Image als echtes Kreativ-Workspace
 
-ImgX Studio ist eine Premium-WebUI für **GPT Image / OpenAI-kompatible Image APIs**. Prompt, Referenzbilder, Ausgabeparameter, mehrere Kandidaten, Auswahl des besten Ergebnisses und weitere Iterationen aus diesem Bild laufen in einem fokussierten Workflow zusammen.
+HC Studio ist eine Premium-WebUI für **GPT Image / OpenAI-kompatible Image APIs**. Prompt, Referenzbilder, Ausgabeparameter, mehrere Kandidaten, Auswahl des besten Ergebnisses und weitere Iterationen aus diesem Bild laufen in einem fokussierten Workflow zusammen.
 
 ## Screenshots
 
 <p align="center">
-  <img src="./public/img.png" alt="ImgX Studio workspace" width="100%">
+  <img src="./public/img.png" alt="HC Studio workspace" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_1.png" alt="ImgX Studio generation controls" width="100%">
+  <img src="./public/img_1.png" alt="HC Studio generation controls" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_2.png" alt="ImgX Studio iteration workflow" width="100%">
+  <img src="./public/img_2.png" alt="HC Studio iteration workflow" width="100%">
 </p>
 
 ## Highlights

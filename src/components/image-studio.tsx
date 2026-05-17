@@ -88,7 +88,7 @@ const MAX_UPLOADS = 4
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
 const DEFAULT_ENDPOINT = "https://api.openai.com/v1"
-const GITHUB_REPOSITORY_URL = "https://github.com/imgx-studio/gpt-image-2-webui"
+const GITHUB_REPOSITORY_URL = "https://github.com/hc-studio/gpt-image-2-webui"
 const CONNECTION_PREFERENCES_KEY = "imgx.connectionPreferences"
 const LEGACY_API_KEY_KEY = "imgx.apiKey"
 const LEGACY_REMEMBER_KEY_KEY = "imgx.rememberKey"
@@ -1065,7 +1065,13 @@ function writeStoredConnectionPreferences({
   localStorage.removeItem(LEGACY_ENDPOINT_KEY)
 }
 
-export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?: Locale }) {
+export function ImageStudio({
+  fixedBaseUrl = null,
+  initialLocale = DEFAULT_LOCALE,
+}: {
+  fixedBaseUrl?: string | null
+  initialLocale?: Locale
+}) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const activeSourceRef = useRef<ActiveSource | null>(null)
   const uploadsRef = useRef<UploadPreview[]>([])
@@ -1083,7 +1089,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [hasLoadedPreferences, setHasLoadedPreferences] = useState(false)
   const [customPrompt, setCustomPrompt] = useState<string | null>(null)
   const [selectedPromptPresetIndex, setSelectedPromptPresetIndex] = useState(0)
-  const [endpoint, setEndpoint] = useState(DEFAULT_ENDPOINT)
+  const [endpoint, setEndpoint] = useState(fixedBaseUrl || DEFAULT_ENDPOINT)
   const [model, setModel] = useState("gpt-image-2")
   const [uploads, setUploads] = useState<UploadPreview[]>([])
   const [isReferenceDropActive, setIsReferenceDropActive] = useState(false)
@@ -1104,6 +1110,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const isCjk = isCjkLocale(locale)
   const selectedLocale = LOCALE_OPTIONS.find((item) => item.value === locale) || LOCALE_OPTIONS[0]
   const promptPresets = useMemo(() => studioPromptPresets[locale], [locale])
+  const isBaseUrlLocked = Boolean(fixedBaseUrl)
   const prompt = customPrompt ?? promptPresets[selectedPromptPresetIndex] ?? promptPresets[0]
   const sizeOptions = useMemo(() => getSizeOptions(locale), [locale])
   const customSizeValue = useMemo(() => normalizeCustomSize(customSize), [customSize])
@@ -1153,13 +1160,13 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
       setRememberKey(preferences.remember)
       setApiKey(preferences.apiKey)
-      setEndpoint(preferences.endpoint)
+      setEndpoint(fixedBaseUrl || preferences.endpoint)
 
       setHasLoadedPreferences(true)
     }, 0)
 
     return () => window.clearTimeout(timeoutId)
-  }, [])
+  }, [fixedBaseUrl])
 
   useEffect(() => {
     if (!hasLoadedPreferences) {
@@ -1171,8 +1178,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       return
     }
 
-    writeStoredConnectionPreferences({ apiKey, endpoint })
-  }, [apiKey, endpoint, hasLoadedPreferences, rememberKey])
+    writeStoredConnectionPreferences({ apiKey, endpoint: fixedBaseUrl || endpoint })
+  }, [apiKey, endpoint, fixedBaseUrl, hasLoadedPreferences, rememberKey])
 
   useEffect(() => {
     uploadsRef.current = uploads
@@ -1562,7 +1569,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
             <div className="studio-logo-mark shrink-0">
               <Image
                 priority
-                alt="ImgX Studio"
+                alt="HC Studio"
                 className="studio-logo-image"
                 height={123}
                 src="/logo.png"
@@ -1947,10 +1954,12 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                     id="endpoint"
                     className="studio-control rounded-md font-mono text-xs focus-visible:border-primary focus-visible:ring-primary/20"
                     value={endpoint}
-                    onChange={(event) => setEndpoint(event.target.value)}
+                    readOnly={isBaseUrlLocked}
+                    aria-readonly={isBaseUrlLocked}
+                    onChange={isBaseUrlLocked ? undefined : (event) => setEndpoint(event.target.value)}
                   />
                   <FieldDescription className="text-xs">
-                    {text.baseUrlDescription}
+                    {isBaseUrlLocked ? text.baseUrlLockedDescription : text.baseUrlDescription}
                   </FieldDescription>
                 </Field>
 

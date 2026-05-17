@@ -1,34 +1,34 @@
-# ImgX Studio
+# HC Studio
 
 > A polished, self-hosted GPT Image workspace for teams that need product shots, campaign visuals, AI creative exploration, and multilingual image workflows.
 
-![ImgX Studio logo](./public/logo.png)
+![HC Studio logo](./public/logo.png)
 
 **Read this in:** [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Português](./README.pt.md)
 
 ## Turn GPT Image into a real creative workspace
 
-ImgX Studio is a premium WebUI for **GPT Image / OpenAI-compatible image APIs**. It helps designers, marketers, product teams, and AI creators move from idea to production-ready visual in one focused flow: write a brief, upload references, tune output specs, generate multiple candidates, pick the strongest image, then keep iterating from that result.
+HC Studio is a premium WebUI for **GPT Image / OpenAI-compatible image APIs**. It helps designers, marketers, product teams, and AI creators move from idea to production-ready visual in one focused flow: write a brief, upload references, tune output specs, generate multiple candidates, pick the strongest image, then keep iterating from that result.
 
-If you want a beautiful, customizable, self-hosted **gpt-image-2 WebUI**, ImgX Studio is designed to be the fastest path from API access to a usable product.
+If you want a beautiful, customizable, self-hosted **gpt-image-2 WebUI**, HC Studio is designed to be the fastest path from API access to a usable product.
 
 ## Product screenshots
 
 <p align="center">
-  <img src="./public/img.png" alt="ImgX Studio workspace" width="100%">
+  <img src="./public/img.png" alt="HC Studio workspace" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_1.png" alt="ImgX Studio generation controls and preview" width="100%">
+  <img src="./public/img_1.png" alt="HC Studio generation controls and preview" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_2.png" alt="ImgX Studio iteration workflow" width="100%">
+  <img src="./public/img_2.png" alt="HC Studio iteration workflow" width="100%">
 </p>
 
-## Why teams choose ImgX Studio
+## Why teams choose HC Studio
 
-| What you need | How ImgX Studio helps |
+| What you need | How HC Studio helps |
 | --- | --- |
 | A polished image-generation UI | Modern Next.js interface with a designer-friendly control panel and clean result grid. |
 | Reliable creative output | Requests 1-4 images as separate calls to reduce missing results from batch limits. |
@@ -137,6 +137,7 @@ Open [http://localhost:3000](http://localhost:3000).
 | --- | --- | --- |
 | `OPENAI_API_KEY` | No | Used by server proxy mode. A key entered in the UI takes priority; otherwise the server env value is used. |
 | `NEXT_ASSET_PREFIX` | No | Sets the static asset prefix for sub-path or CDN deployments. |
+| `NEXT_FIXED_BASE_URL` | No | Locks the UI base URL input to a specific OpenAI-compatible endpoint. |
 
 ## Deploy
 
@@ -161,7 +162,7 @@ pnpm start
 Build the image locally:
 
 ```bash
-docker build -t imgx-studio:local .
+docker build -t hc-studio:local .
 ```
 
 Run it:
@@ -169,7 +170,7 @@ Run it:
 ```bash
 docker run --rm -p 3000:3000 \
   -e OPENAI_API_KEY=sk-... \
-  imgx-studio:local
+  hc-studio:local
 ```
 
 Pull a released image from GHCR:
@@ -204,7 +205,7 @@ Issues and pull requests are welcome, especially for:
 - Workflow and UI refinements
 - Deployment examples and docs
 
-If ImgX Studio saves you time building a gpt-image-2 WebUI, consider starring the project and sharing it with creators who need a better AI image workflow.
+If HC Studio saves you time building a gpt-image-2 WebUI, consider starring the project and sharing it with creators who need a better AI image workflow.
 
 ## License
 
