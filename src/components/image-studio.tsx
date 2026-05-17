@@ -1101,6 +1101,7 @@ export function ImageStudio({
   const [imageCount, setImageCount] = useState(1)
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null)
   const [result, setResult] = useState<StudioResponse | null>(null)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
@@ -1455,6 +1456,7 @@ export function ImageStudio({
     }
 
     setIsGenerating(true)
+    setGenerationStartedAt(Date.now())
     setProgress(8)
     setResult(null)
     setSelectedImageIndex(0)
@@ -1548,10 +1550,12 @@ export function ImageStudio({
       progressResetTimeoutRef.current = window.setTimeout(() => {
         setProgress(0)
         progressResetTimeoutRef.current = null
+        setGenerationStartedAt(null)
       }, 900)
     } catch (error) {
       toast.error(getGenerationErrorMessage(error, text.generationFailed))
       setProgress(0)
+      setGenerationStartedAt(null)
     } finally {
       setIsGenerating(false)
     }
@@ -2063,13 +2067,25 @@ export function ImageStudio({
                   : text.readyForNextConcept}
               </span>
             </div>
-            <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:flex">
-              <KeyRoundIcon className="size-3" />
-              {apiKey ? text.keySet : text.noKey}
-              <span className="text-border">·</span>
-              <span className="max-w-[260px] truncate font-mono text-[11px]">
-                {endpoint}
-              </span>
+            <div className="flex items-center gap-2">
+              {isGenerating && generationStartedAt && (
+                <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:flex">
+                  <LoaderCircleIcon className="size-3.5 animate-spin text-primary" />
+                  <span>{text.generating}</span>
+                  <span className="text-border">·</span>
+                  <span className="font-mono text-[11px]">
+                    {Math.floor((Date.now() - generationStartedAt) / 1000)}s
+                  </span>
+                </div>
+              )}
+              <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:flex">
+                <KeyRoundIcon className="size-3" />
+                {apiKey ? text.keySet : text.noKey}
+                <span className="text-border">·</span>
+                <span className="max-w-[260px] truncate font-mono text-[11px]">
+                  {endpoint}
+                </span>
+              </div>
             </div>
           </div>
 
