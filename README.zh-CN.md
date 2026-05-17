@@ -134,12 +134,36 @@ pnpm dev
 
 ### Node.js / Docker 场景
 
-项目已开启 Next.js `standalone` 输出：
+项目已开启 Next.js `standalone` 输出，可以直接放进 Docker 运行：
 
 ```bash
 pnpm build
 pnpm start
 ```
+
+### Docker
+
+本地构建镜像：
+
+```bash
+docker build -t imgx-studio:local .
+```
+
+运行镜像：
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e OPENAI_API_KEY=sk-... \
+  imgx-studio:local
+```
+
+从 GHCR 拉取已发布镜像：
+
+```bash
+docker pull ghcr.io/<owner>/<repo>:v1.1.0
+```
+
+仓库会在推送类似 `v1.1.0` 这样的 git tag 时自动构建并发布 GHCR 镜像。
 
 ## API Key 与隐私说明
 

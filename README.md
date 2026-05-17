@@ -149,12 +149,36 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ### Node.js / Docker-like environments
 
-The project uses Next.js `standalone` output:
+The project uses Next.js `standalone` output, so it can run directly in Docker.
 
 ```bash
 pnpm build
 pnpm start
 ```
+
+### Docker
+
+Build the image locally:
+
+```bash
+docker build -t imgx-studio:local .
+```
+
+Run it:
+
+```bash
+docker run --rm -p 3000:3000 \
+  -e OPENAI_API_KEY=sk-... \
+  imgx-studio:local
+```
+
+Pull a released image from GHCR:
+
+```bash
+docker pull ghcr.io/<owner>/<repo>:v1.1.0
+```
+
+The repository also publishes a new GHCR image automatically when you push a git tag such as `v1.1.0`.
 
 ## API key and privacy
 
