@@ -19,7 +19,7 @@ export const LOCALE_COOKIE_KEY = "imgx.locale"
 export const LOCALE_STORAGE_KEY = "imgx.locale"
 
 const en = {
-  metadataTitle: "HC Studio | AI Image Workspace",
+  metadataTitle: "HC | AI Image Workspace",
   metadataDescription:
     "A premium AI image studio with reliable multi-image generation and multilingual support.",
   localeSwitchAria: "Switch language",
@@ -47,7 +47,6 @@ const en = {
   model: "model",
   baseUrl: "base url",
   baseUrlDescription: "auto-resolves to /v1/images/generations or /edits",
-  baseUrlLockedDescription: "locked by server environment",
   apiKey: "api key",
   showApiKey: "Show",
   hideApiKey: "Hide",
@@ -115,7 +114,7 @@ export type MessageKey = keyof StudioMessages
 export const studioMessages: Record<Locale, StudioMessages> = {
   en,
   zh: {
-    metadataTitle: "HC Studio｜AI 图片工作台",
+    metadataTitle: "HC｜AI 图片工作台",
     metadataDescription: "一个支持可靠多图生成和多语言切换的高品质 AI 图片工作台。",
     localeSwitchAria: "切换语言",
     localeLabel: "语言",
@@ -141,7 +140,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     model: "模型",
     baseUrl: "基础地址",
     baseUrlDescription: "会自动补全到 /v1/images/generations 或 /edits",
-    baseUrlLockedDescription: "由服务端环境变量锁定",
     apiKey: "API Key",
     showApiKey: "显示",
     hideApiKey: "隐藏",
@@ -202,7 +200,7 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     backgroundTransparent: "透明",
   },
   "zh-TW": {
-    metadataTitle: "HC Studio｜AI 圖片工作台",
+    metadataTitle: "HC｜AI 圖片工作台",
     metadataDescription: "一個支援可靠多圖生成與多語言切換的高品質 AI 圖片工作台。",
     localeSwitchAria: "切換語言",
     localeLabel: "語言",
@@ -228,7 +226,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     model: "模型",
     baseUrl: "基礎地址",
     baseUrlDescription: "會自動補全到 /v1/images/generations 或 /edits",
-    baseUrlLockedDescription: "由伺服器環境變數鎖定",
     apiKey: "API Key",
     showApiKey: "顯示",
     hideApiKey: "隱藏",
@@ -289,7 +286,7 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     backgroundTransparent: "透明",
   },
   ja: {
-    metadataTitle: "HC Studio | AI画像ワークスペース",
+    metadataTitle: "HC | AI画像ワークスペース",
     metadataDescription: "安定した複数画像生成と多言語切替に対応したAI画像スタジオ。",
     localeSwitchAria: "言語を切り替え",
     localeLabel: "言語",
@@ -315,7 +312,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     model: "モデル",
     baseUrl: "ベースURL",
     baseUrlDescription: "/v1/images/generations または /edits に自動解決します",
-    baseUrlLockedDescription: "サーバー環境変数で固定されています",
     apiKey: "API Key",
     showApiKey: "表示",
     hideApiKey: "非表示",
@@ -377,7 +373,7 @@ export const studioMessages: Record<Locale, StudioMessages> = {
   },
   ko: {
     ...en,
-    metadataTitle: "HC Studio | AI 이미지 워크스페이스",
+    metadataTitle: "HC | AI 이미지 워크스페이스",
     metadataDescription: "안정적인 다중 이미지 생성과 다국어 전환을 지원하는 AI 이미지 스튜디오.",
     localeSwitchAria: "언어 변경",
     localeLabel: "언어",
@@ -403,7 +399,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     model: "모델",
     baseUrl: "기본 URL",
     baseUrlDescription: "/v1/images/generations 또는 /edits로 자동 연결됩니다",
-    baseUrlLockedDescription: "서버 환경 변수로 잠금됨",
     showApiKey: "표시",
     hideApiKey: "숨기기",
     rememberOnDevice: "이 기기에 저장",
@@ -463,7 +458,7 @@ export const studioMessages: Record<Locale, StudioMessages> = {
   },
   es: {
     ...en,
-    metadataTitle: "HC Studio | Espacio de imágenes IA",
+    metadataTitle: "HC | Espacio de imágenes IA",
     metadataDescription: "Un estudio de imágenes IA con generación múltiple fiable y soporte multilingüe.",
     localeSwitchAria: "Cambiar idioma",
     localeLabel: "Idioma",
@@ -489,7 +484,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     model: "modelo",
     baseUrl: "URL base",
     baseUrlDescription: "se resuelve automáticamente a /v1/images/generations o /edits",
-    baseUrlLockedDescription: "bloqueada por variable de entorno del servidor",
     apiKey: "API Key",
     showApiKey: "Mostrar",
     hideApiKey: "Ocultar",
@@ -550,7 +544,7 @@ export const studioMessages: Record<Locale, StudioMessages> = {
   },
   fr: {
     ...en,
-    metadataTitle: "HC Studio | Espace image IA",
+    metadataTitle: "HC | Espace image IA",
     metadataDescription: "Un studio d'image IA avec génération multiple fiable et interface multilingue.",
     localeSwitchAria: "Changer de langue",
     localeLabel: "Langue",
@@ -576,7 +570,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     model: "modèle",
     baseUrl: "URL de base",
     baseUrlDescription: "résout automatiquement vers /v1/images/generations ou /edits",
-    baseUrlLockedDescription: "verrouillée par une variable d'environnement serveur",
     showApiKey: "Afficher",
     hideApiKey: "Masquer",
     rememberOnDevice: "Mémoriser sur cet appareil",
@@ -635,7 +628,7 @@ export const studioMessages: Record<Locale, StudioMessages> = {
   },
   de: {
     ...en,
-    metadataTitle: "HC Studio | KI-Bildarbeitsbereich",
+    metadataTitle: "HC | KI-Bildarbeitsbereich",
     metadataDescription: "Ein KI-Bildstudio mit zuverlässiger Mehrfachgenerierung und Mehrsprachigkeit.",
     localeSwitchAria: "Sprache wechseln",
     localeLabel: "Sprache",
@@ -661,7 +654,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     model: "Modell",
     baseUrl: "Basis-URL",
     baseUrlDescription: "wird automatisch zu /v1/images/generations oder /edits aufgelöst",
-    baseUrlLockedDescription: "durch Server-Umgebungsvariable gesperrt",
     showApiKey: "Anzeigen",
     hideApiKey: "Ausblenden",
     rememberOnDevice: "Auf diesem Gerät merken",
@@ -720,7 +712,7 @@ export const studioMessages: Record<Locale, StudioMessages> = {
   },
   pt: {
     ...en,
-    metadataTitle: "HC Studio | Espaço de imagens com IA",
+    metadataTitle: "HC | Espaço de imagens com IA",
     metadataDescription: "Um estúdio de imagens com IA, geração múltipla confiável e suporte multilíngue.",
     localeSwitchAria: "Alterar idioma",
     localeLabel: "Idioma",
@@ -746,7 +738,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     model: "modelo",
     baseUrl: "URL base",
     baseUrlDescription: "resolve automaticamente para /v1/images/generations ou /edits",
-    baseUrlLockedDescription: "bloqueada por variável de ambiente do servidor",
     showApiKey: "Mostrar",
     hideApiKey: "Ocultar",
     rememberOnDevice: "Lembrar neste dispositivo",

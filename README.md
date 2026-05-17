@@ -1,34 +1,34 @@
-# HC Studio
+# HC
 
 > A polished, self-hosted GPT Image workspace for teams that need product shots, campaign visuals, AI creative exploration, and multilingual image workflows.
 
-![HC Studio logo](./public/logo.png)
+![HC logo](./public/logo.png)
 
 **Read this in:** [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Português](./README.pt.md)
 
 ## Turn GPT Image into a real creative workspace
 
-HC Studio is a premium WebUI for **GPT Image / OpenAI-compatible image APIs**. It helps designers, marketers, product teams, and AI creators move from idea to production-ready visual in one focused flow: write a brief, upload references, tune output specs, generate multiple candidates, pick the strongest image, then keep iterating from that result.
+HC is a premium WebUI for **GPT Image / OpenAI-compatible image APIs**. It helps designers, marketers, product teams, and AI creators move from idea to production-ready visual in one focused flow: write a brief, upload references, tune output specs, generate multiple candidates, pick the strongest image, then keep iterating from that result.
 
-If you want a beautiful, customizable, self-hosted **gpt-image-2 WebUI**, HC Studio is designed to be the fastest path from API access to a usable product.
+If you want a beautiful, customizable, self-hosted **gpt-image-2 WebUI**, HC is designed to be the fastest path from API access to a usable product.
 
 ## Product screenshots
 
 <p align="center">
-  <img src="./public/img.png" alt="HC Studio workspace" width="100%">
+  <img src="./public/img.png" alt="HC workspace" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_1.png" alt="HC Studio generation controls and preview" width="100%">
+  <img src="./public/img_1.png" alt="HC generation controls and preview" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_2.png" alt="HC Studio iteration workflow" width="100%">
+  <img src="./public/img_2.png" alt="HC iteration workflow" width="100%">
 </p>
 
-## Why teams choose HC Studio
+## Why teams choose HC
 
-| What you need | How HC Studio helps |
+| What you need | How HC helps |
 | --- | --- |
 | A polished image-generation UI | Modern Next.js interface with a designer-friendly control panel and clean result grid. |
 | Reliable creative output | Requests 1-4 images as separate calls to reduce missing results from batch limits. |
@@ -162,7 +162,7 @@ pnpm start
 Build the image locally:
 
 ```bash
-docker build -t hc-studio:local .
+docker build -t hc:local .
 ```
 
 Run it:
@@ -170,7 +170,7 @@ Run it:
 ```bash
 docker run --rm -p 3000:3000 \
   -e OPENAI_API_KEY=sk-... \
-  hc-studio:local
+  hc:local
 ```
 
 Pull a released image from GHCR:
@@ -205,7 +205,7 @@ Issues and pull requests are welcome, especially for:
 - Workflow and UI refinements
 - Deployment examples and docs
 
-If HC Studio saves you time building a gpt-image-2 WebUI, consider starring the project and sharing it with creators who need a better AI image workflow.
+If HC saves you time building a gpt-image-2 WebUI, consider starring the project and sharing it with creators who need a better AI image workflow.
 
 ## License
 

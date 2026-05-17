@@ -1,34 +1,34 @@
-# HC Studio
+# HC
 
 > 面向设计师、营销团队和 AI 创作者的自托管 GPT 图片工作台，把 gpt-image-2 变成可迭代、可交付的创意生产工具。
 
-![HC Studio logo](./public/logo.png)
+![HC logo](./public/logo.png)
 
 **阅读语言：** [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Português](./README.pt.md)
 
 ## 把 GPT Image 变成真正的创意工作台
 
-HC Studio 是一个面向 **设计师、品牌营销、独立开发者和 AI 图片工作流团队** 的 GPT 图片生成 WebUI。它把 GPT Image / OpenAI-compatible image API 包装成更顺手的可视化产品：写 prompt、上传参考图、选择尺寸和质量、批量出图、挑选结果、继续二创，一条链路完成。
+HC 是一个面向 **设计师、品牌营销、独立开发者和 AI 图片工作流团队** 的 GPT 图片生成 WebUI。它把 GPT Image / OpenAI-compatible image API 包装成更顺手的可视化产品：写 prompt、上传参考图、选择尺寸和质量、批量出图、挑选结果、继续二创，一条链路完成。
 
 它不是一个只负责「发请求」的 demo，而是一个可以直接部署、可以自定义、适合产品图/主视觉/电商图/灵感探索的 **gpt-image-2 WebUI 起点**。
 
 ## 产品截图
 
 <p align="center">
-  <img src="./public/img.png" alt="HC Studio 工作台" width="100%">
+  <img src="./public/img.png" alt="HC 工作台" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_1.png" alt="HC Studio 参数与预览" width="100%">
+  <img src="./public/img_1.png" alt="HC 参数与预览" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_2.png" alt="HC Studio 迭代工作流" width="100%">
+  <img src="./public/img_2.png" alt="HC 迭代工作流" width="100%">
 </p>
 
 ## 为什么值得 Star
 
-| 你需要 | HC Studio 提供 |
+| 你需要 | HC 提供 |
 | --- | --- |
 | 更像产品的图片生成界面 | 现代化 Next.js 界面，参数区、生成区、迭代区围绕真实创作流程设计。 |
 | 更稳定的多图输出 | 选择 1-4 张图片时逐张请求，减少接口批量限制导致的少图问题。 |
@@ -147,7 +147,7 @@ pnpm start
 本地构建镜像：
 
 ```bash
-docker build -t hc-studio:local .
+docker build -t hc:local .
 ```
 
 运行镜像：
@@ -155,7 +155,7 @@ docker build -t hc-studio:local .
 ```bash
 docker run --rm -p 3000:3000 \
   -e OPENAI_API_KEY=sk-... \
-  hc-studio:local
+  hc:local
 ```
 
 从 GHCR 拉取已发布镜像：

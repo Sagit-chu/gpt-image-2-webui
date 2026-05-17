@@ -88,7 +88,7 @@ const MAX_UPLOADS = 4
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
 const DEFAULT_ENDPOINT = "https://api.openai.com/v1"
-const GITHUB_REPOSITORY_URL = "https://github.com/hc-studio/gpt-image-2-webui"
+const GITHUB_REPOSITORY_URL = "https://github.com/hc/gpt-image-2-webui"
 const CONNECTION_PREFERENCES_KEY = "imgx.connectionPreferences"
 const LEGACY_API_KEY_KEY = "imgx.apiKey"
 const LEGACY_REMEMBER_KEY_KEY = "imgx.rememberKey"
@@ -1569,7 +1569,7 @@ export function ImageStudio({
             <div className="studio-logo-mark shrink-0">
               <Image
                 priority
-                alt="HC Studio"
+                alt="HC"
                 className="studio-logo-image"
                 height={123}
                 src="/logo.png"
@@ -1958,9 +1958,7 @@ export function ImageStudio({
                     aria-readonly={isBaseUrlLocked}
                     onChange={isBaseUrlLocked ? undefined : (event) => setEndpoint(event.target.value)}
                   />
-                  <FieldDescription className="text-xs">
-                    {isBaseUrlLocked ? text.baseUrlLockedDescription : text.baseUrlDescription}
-                  </FieldDescription>
+                  <FieldDescription className="text-xs">{text.baseUrlDescription}</FieldDescription>
                 </Field>
 
                 <Field>

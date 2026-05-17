@@ -1,27 +1,27 @@
-# HC Studio
+# HC
 
 > Un studio GPT Image auto-hébergé pour designers, équipes marketing et créateurs IA qui veulent transformer gpt-image-2 en flux visuel prêt pour la production.
 
-![HC Studio logo](./public/logo.png)
+![HC logo](./public/logo.png)
 
 **Langue :** [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Português](./README.pt.md)
 
 ## Transformez GPT Image en véritable espace créatif
 
-HC Studio est une WebUI premium pour **GPT Image / API d'image compatibles OpenAI**. Elle regroupe brief, références, paramètres de sortie, génération de plusieurs options, sélection du meilleur visuel et itération depuis ce résultat.
+HC est une WebUI premium pour **GPT Image / API d'image compatibles OpenAI**. Elle regroupe brief, références, paramètres de sortie, génération de plusieurs options, sélection du meilleur visuel et itération depuis ce résultat.
 
 ## Captures d'écran
 
 <p align="center">
-  <img src="./public/img.png" alt="HC Studio workspace" width="100%">
+  <img src="./public/img.png" alt="HC workspace" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_1.png" alt="HC Studio generation controls" width="100%">
+  <img src="./public/img_1.png" alt="HC generation controls" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_2.png" alt="HC Studio iteration workflow" width="100%">
+  <img src="./public/img_2.png" alt="HC iteration workflow" width="100%">
 </p>
 
 ## Points forts

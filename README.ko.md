@@ -1,27 +1,27 @@
-# HC Studio
+# HC
 
 > 디자이너, 마케팅 팀, AI 크리에이터를 위한 셀프 호스팅 GPT Image 워크스페이스입니다. gpt-image-2를 반복 가능한 제작 도구로 바꿉니다.
 
-![HC Studio logo](./public/logo.png)
+![HC logo](./public/logo.png)
 
 **Language:** [English](./README.md) | [简体中文](./README.zh-CN.md) | [繁體中文](./README.zh-TW.md) | [日本語](./README.ja.md) | [한국어](./README.ko.md) | [Español](./README.es.md) | [Français](./README.fr.md) | [Deutsch](./README.de.md) | [Português](./README.pt.md)
 
 ## GPT Image를 실전 제작 워크스페이스로
 
-HC Studio는 **GPT Image / OpenAI-compatible image API**를 위한 프리미엄 WebUI입니다. 프롬프트 작성, 레퍼런스 이미지 업로드, 품질과 크기 조정, 여러 후보 생성, 결과 선택, 선택한 이미지에서 다음 라운드로 이어지는 흐름을 하나의 작업 공간에 담았습니다.
+HC는 **GPT Image / OpenAI-compatible image API**를 위한 프리미엄 WebUI입니다. 프롬프트 작성, 레퍼런스 이미지 업로드, 품질과 크기 조정, 여러 후보 생성, 결과 선택, 선택한 이미지에서 다음 라운드로 이어지는 흐름을 하나의 작업 공간에 담았습니다.
 
 ## 스크린샷
 
 <p align="center">
-  <img src="./public/img.png" alt="HC Studio workspace" width="100%">
+  <img src="./public/img.png" alt="HC workspace" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_1.png" alt="HC Studio generation controls" width="100%">
+  <img src="./public/img_1.png" alt="HC generation controls" width="100%">
 </p>
 
 <p align="center">
-  <img src="./public/img_2.png" alt="HC Studio iteration workflow" width="100%">
+  <img src="./public/img_2.png" alt="HC iteration workflow" width="100%">
 </p>
 
 ## 주요 장점
