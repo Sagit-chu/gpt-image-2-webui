@@ -6,6 +6,7 @@ import {
   extractGeneratedImages,
   getImageApiError,
   getPayloadField,
+  materializeGeneratedImages,
   normalizeImageEndpoint,
   normalizeOpenAIBaseURL,
 } from "@/lib/image-request"
@@ -215,7 +216,10 @@ export async function POST(request: Request) {
       })
     }
 
-    const generatedImages = extractGeneratedImages(payload, outputFormat)
+    const generatedImages = await materializeGeneratedImages(
+      extractGeneratedImages(payload, outputFormat),
+      outputFormat
+    )
 
     if (!generatedImages.length) {
       return NextResponse.json(

@@ -9,6 +9,8 @@ export type GeneratedImage = {
   src: string
 }
 
+type FetchLike = typeof fetch
+
 export function normalizeOpenAIBaseURL(value: string, locale: Locale = DEFAULT_LOCALE) {
   const rawEndpoint = (value || DEFAULT_OPENAI_BASE_URL).trim().replace(/\/+$/, "")
 
@@ -221,4 +223,51 @@ export function getPayloadField(payload: unknown, key: string) {
   }
 
   return payload[key]
+}
+
+function isRemoteImageSrc(value: string) {
+  return value.startsWith("http://") || value.startsWith("https://")
+}
+
+function encodeBase64(bytes: Uint8Array) {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(bytes).toString("base64")
+  }
+
+  let binary = ""
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+
+  return btoa(binary)
+}
+
+async function remoteImageToDataUrl(src: string, outputFormat: string, fetchImpl: FetchLike) {
+  const response = await fetchImpl(src)
+
+  if (!response.ok) {
+    throw new Error(`Could not download generated image: ${response.status}`)
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  const contentType = response.headers.get("content-type")?.split(";")[0].trim()
+  const mimeType = contentType && contentType.startsWith("image/") ? contentType : `image/${outputFormat}`
+
+  return `data:${mimeType};base64,${encodeBase64(bytes)}`
+}
+
+export async function materializeGeneratedImages(
+  images: GeneratedImage[],
+  outputFormat: string,
+  fetchImpl: FetchLike = fetch
+) {
+  return Promise.all(
+    images.map(async (image) => ({
+      ...image,
+      src: isRemoteImageSrc(image.src)
+        ? await remoteImageToDataUrl(image.src, outputFormat, fetchImpl)
+        : image.src,
+    }))
+  )
 }

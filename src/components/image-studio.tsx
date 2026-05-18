@@ -66,6 +66,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { type GeneratedImage } from "@/lib/image-request"
+import { readResponseJson } from "@/lib/http-response"
 import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE_KEY,
@@ -82,6 +83,7 @@ import {
   type Locale,
   type StudioMessages,
 } from "@/lib/i18n"
+import { DEFAULT_MODEL, modelItems } from "@/lib/model-options"
 import { cn } from "@/lib/utils"
 
 const MAX_UPLOADS = 4
@@ -684,12 +686,6 @@ const remixRecipeItems: {
   { count: 2, icon: ScissorsIcon, id: "inpaint" },
 ]
 
-const modelItems = [
-  { label: "gpt-image-2", value: "gpt-image-2" },
-  { label: "gpt-image-2-2026-04-21", value: "gpt-image-2-2026-04-21" },
-  { label: "gpt-image-1", value: "gpt-image-1" },
-]
-
 type PresetSizeValue = (typeof PRESET_SIZE_VALUES)[number]
 type SizeValue = PresetSizeValue | (string & {})
 type SizeSelectValue = PresetSizeValue | typeof CUSTOM_SIZE_OPTION_VALUE
@@ -1090,7 +1086,7 @@ export function ImageStudio({
   const [customPrompt, setCustomPrompt] = useState<string | null>(null)
   const [selectedPromptPresetIndex, setSelectedPromptPresetIndex] = useState(0)
   const [endpoint, setEndpoint] = useState(fixedBaseUrl || DEFAULT_ENDPOINT)
-  const [model, setModel] = useState("gpt-image-2")
+  const [model, setModel] = useState(DEFAULT_MODEL)
   const [uploads, setUploads] = useState<UploadPreview[]>([])
   const [isReferenceDropActive, setIsReferenceDropActive] = useState(false)
   const [sizeMode, setSizeMode] = useState<SizeSelectValue>(DEFAULT_SIZE)
@@ -1417,17 +1413,20 @@ export function ImageStudio({
       method: "POST",
       body: formData,
     })
-    const payload = (await response.json()) as {
+    const payload = await readResponseJson<{
       endpoint?: string
       error?: string
       images?: GeneratedImage[]
-    }
+    }>(response)
 
     if (!response.ok) {
-      throw new Error(payload.error || t(locale, "requestFailedStatus", { status: response.status }))
+      throw new Error(
+        payload?.error ||
+        t(locale, "requestFailedStatus", { status: response.status })
+      )
     }
 
-    if (!payload.images?.length) {
+    if (!payload?.images?.length) {
       throw new Error(t(locale, "noImageInPayload"))
     }
 
@@ -1930,7 +1929,7 @@ export function ImageStudio({
                   <Select
                     items={modelItems}
                     value={model}
-                    onValueChange={(value) => setModel(selectValue(value, "gpt-image-2"))}
+                    onValueChange={(value) => setModel(selectValue(value, DEFAULT_MODEL))}
                   >
                     <SelectTrigger className="studio-control w-full rounded-md">
                       <SelectValue />
