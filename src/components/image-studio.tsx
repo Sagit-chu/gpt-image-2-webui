@@ -1,6 +1,5 @@
 "use client"
 
-import Image from "next/image"
 import type { CSSProperties, DragEvent } from "react"
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import {
@@ -90,7 +89,6 @@ const MAX_UPLOADS = 4
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
 const DEFAULT_ENDPOINT = "https://api.openai.com/v1"
-const GITHUB_REPOSITORY_URL = "https://github.com/hc/gpt-image-2-webui"
 const CONNECTION_PREFERENCES_KEY = "imgx.connectionPreferences"
 const LEGACY_API_KEY_KEY = "imgx.apiKey"
 const LEGACY_REMEMBER_KEY_KEY = "imgx.rememberKey"
@@ -112,23 +110,6 @@ const PRESET_SIZE_VALUES = [
   "3840x2160",
   "2160x3840",
 ] as const
-
-function GitHubMarkIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      data-icon="inline-start"
-      fill="currentColor"
-      viewBox="0 0 24 24"
-    >
-      <path
-        clipRule="evenodd"
-        d="M12 0.75C5.79 0.75 0.75 5.79 0.75 12c0 4.97 3.22 9.18 7.69 10.67 0.56 0.1 0.77-0.24 0.77-0.54 0-0.27-0.01-1.14-0.02-2.07-3.13 0.68-3.79-1.33-3.79-1.33-0.51-1.3-1.25-1.65-1.25-1.65-1.02-0.7 0.08-0.68 0.08-0.68 1.13 0.08 1.73 1.16 1.73 1.16 1 1.72 2.63 1.22 3.27 0.93 0.1-0.73 0.39-1.22 0.71-1.5-2.5-0.28-5.13-1.25-5.13-5.56 0-1.23 0.44-2.23 1.16-3.02-0.12-0.28-0.5-1.43 0.11-2.98 0 0 0.95-0.3 3.09 1.15 0.9-0.25 1.86-0.38 2.82-0.38s1.92 0.13 2.82 0.38c2.15-1.45 3.09-1.15 3.09-1.15 0.61 1.55 0.23 2.7 0.11 2.98 0.72 0.79 1.16 1.79 1.16 3.02 0 4.32-2.63 5.27-5.14 5.55 0.4 0.35 0.76 1.03 0.76 2.08 0 1.5-0.01 2.71-0.01 3.07 0 0.3 0.2 0.65 0.77 0.54A11.26 11.26 0 0 0 23.25 12C23.25 5.79 18.21 0.75 12 0.75Z"
-        fillRule="evenodd"
-      />
-    </svg>
-  )
-}
 
 type RemixRecipeId = "variations" | "retouch" | "upscale" | "inpaint"
 
@@ -1567,20 +1548,7 @@ export function ImageStudio({
       className={cn("notranslate studio-shell flex min-h-screen flex-col text-foreground", isCjk && "studio-cjk")}
     >
       <header className="studio-header-surface sticky top-0 z-30 border-b backdrop-blur-xl">
-        <div className="mx-auto flex w-full max-w-[1840px] items-center justify-between gap-3 px-4 py-3 sm:gap-5 sm:px-6">
-          <div className="flex items-center">
-            <div className="studio-logo-mark shrink-0">
-              <Image
-                priority
-                alt="HC"
-                className="studio-logo-image"
-                height={123}
-                src="/logo.png"
-                style={{ width: "100%", height: "auto" }}
-                width={426}
-              />
-            </div>
-          </div>
+        <div className="mx-auto flex w-full max-w-[1840px] items-center justify-end gap-3 px-4 py-3 sm:gap-5 sm:px-6">
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 font-mono text-[11px] text-muted-foreground shadow-sm md:flex">
               <span className="font-medium text-foreground">{model}</span>
@@ -1628,20 +1596,6 @@ export function ImageStudio({
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <a
-              aria-label="GitHub"
-              className={cn(
-                buttonVariants({ size: "lg", variant: "outline" }),
-                "h-10 rounded-md bg-muted/40 px-3 shadow-sm"
-              )}
-              href={GITHUB_REPOSITORY_URL}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <GitHubMarkIcon />
-              <span className="hidden sm:inline">GitHub</span>
-              <span className="sr-only sm:hidden">GitHub</span>
-            </a>
           </div>
         </div>
       </header>
