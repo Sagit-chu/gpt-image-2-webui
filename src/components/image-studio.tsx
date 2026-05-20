@@ -1079,6 +1079,7 @@ export function ImageStudio({
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
   const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null)
+  const [elapsedGenerationSeconds, setElapsedGenerationSeconds] = useState(0)
   const [result, setResult] = useState<StudioResponse | null>(null)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
@@ -1166,6 +1167,21 @@ export function ImageStudio({
   useEffect(() => {
     activeSourceRef.current = activeSource
   }, [activeSource])
+
+  useEffect(() => {
+    if (!isGenerating || generationStartedAt === null) {
+      return
+    }
+
+    const updateElapsedGenerationSeconds = () => {
+      setElapsedGenerationSeconds(Math.max(0, Math.floor((Date.now() - generationStartedAt) / 1000)))
+    }
+
+    updateElapsedGenerationSeconds()
+    const intervalId = window.setInterval(updateElapsedGenerationSeconds, 1000)
+
+    return () => window.clearInterval(intervalId)
+  }, [generationStartedAt, isGenerating])
 
   useEffect(() => {
     return () => {
@@ -1437,6 +1453,7 @@ export function ImageStudio({
 
     setIsGenerating(true)
     setGenerationStartedAt(Date.now())
+    setElapsedGenerationSeconds(0)
     setProgress(8)
     setResult(null)
     setSelectedImageIndex(0)
@@ -1529,12 +1546,14 @@ export function ImageStudio({
 
       progressResetTimeoutRef.current = window.setTimeout(() => {
         setProgress(0)
+        setElapsedGenerationSeconds(0)
         progressResetTimeoutRef.current = null
         setGenerationStartedAt(null)
       }, 900)
     } catch (error) {
       toast.error(getGenerationErrorMessage(error, text.generationFailed))
       setProgress(0)
+      setElapsedGenerationSeconds(0)
       setGenerationStartedAt(null)
     } finally {
       setIsGenerating(false)
@@ -2027,7 +2046,7 @@ export function ImageStudio({
                   <span>{text.generating}</span>
                   <span className="text-border">·</span>
                   <span className="font-mono text-[11px]">
-                    {Math.floor((Date.now() - generationStartedAt) / 1000)}s
+                    {elapsedGenerationSeconds}s
                   </span>
                 </div>
               )}
