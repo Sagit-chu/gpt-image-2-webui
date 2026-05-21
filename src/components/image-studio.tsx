@@ -1184,6 +1184,17 @@ export function ImageStudio({
   }, [generationStartedAt, isGenerating])
 
   useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ""
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
+  }, [])
+
+  useEffect(() => {
     return () => {
       for (const upload of uploadsRef.current) {
         URL.revokeObjectURL(upload.url)
