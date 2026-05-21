@@ -29,6 +29,13 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
   Card,
   CardContent,
   CardDescription,
@@ -38,7 +45,6 @@ import {
 } from "@/components/ui/card"
 import {
   Field,
-  FieldContent,
   FieldDescription,
   FieldGroup,
   FieldLabel,
@@ -61,7 +67,6 @@ import {
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { type GeneratedImage } from "@/lib/image-request"
@@ -1063,6 +1068,7 @@ export function ImageStudio({
   const [apiKey, setApiKey] = useState("")
   const [isApiKeyVisible, setIsApiKeyVisible] = useState(false)
   const [rememberKey, setRememberKey] = useState(false)
+  const [isRememberDialogOpen, setIsRememberDialogOpen] = useState(false)
   const [hasLoadedPreferences, setHasLoadedPreferences] = useState(false)
   const [customPrompt, setCustomPrompt] = useState<string | null>(null)
   const [selectedPromptPresetIndex, setSelectedPromptPresetIndex] = useState(0)
@@ -1081,6 +1087,7 @@ export function ImageStudio({
   const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null)
   const [elapsedGenerationSeconds, setElapsedGenerationSeconds] = useState(0)
   const [result, setResult] = useState<StudioResponse | null>(null)
+  const [history, setHistory] = useState<StudioResponse[]>([])
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
   const locale = localeOverride ?? browserLocale
@@ -1466,7 +1473,12 @@ export function ImageStudio({
     setGenerationStartedAt(Date.now())
     setElapsedGenerationSeconds(0)
     setProgress(8)
-    setResult(null)
+    setResult((prev) => {
+      if (prev) {
+        setHistory((h) => [prev, ...h])
+      }
+      return null
+    })
     setSelectedImageIndex(0)
 
     const total = Math.min(Math.max(imageCount, 1), 4)
@@ -1965,6 +1977,11 @@ export function ImageStudio({
                       className="studio-control h-11 w-full min-w-0 rounded-md border px-3 py-1 pr-11 font-mono text-xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-primary/20"
                       value={apiKey}
                       onChange={(event) => setApiKey(event.target.value)}
+                      onBlur={() => {
+                        if (apiKey.trim() && !rememberKey) {
+                          setIsRememberDialogOpen(true)
+                        }
+                      }}
                     />
                     <button
                       type="button"
@@ -1980,21 +1997,25 @@ export function ImageStudio({
                   </div>
                 </Field>
 
-                <Field orientation="horizontal">
-                  <Switch
-                    checked={rememberKey}
-                    id="remember-key"
-                    onCheckedChange={setRememberKey}
-                  />
-                  <FieldContent>
-                    <FieldLabel htmlFor="remember-key" className="text-xs">
-                      {text.rememberOnDevice}
-                    </FieldLabel>
-                    <FieldDescription className="text-xs">
-                      {text.rememberDescription}
-                    </FieldDescription>
-                  </FieldContent>
-                </Field>
+                <AlertDialog open={isRememberDialogOpen} onOpenChange={setIsRememberDialogOpen}>
+                  <AlertDialogPopup>
+                    <AlertDialogTitle>{text.rememberDialogTitle}</AlertDialogTitle>
+                    <AlertDialogDescription>{text.rememberDialogDescription}</AlertDialogDescription>
+                    <div className="mt-4 flex justify-end gap-2">
+                      <AlertDialogClose
+                        className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium transition-colors hover:bg-muted"
+                      >
+                        {text.rememberDialogCancel}
+                      </AlertDialogClose>
+                      <AlertDialogClose
+                        className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                        onClick={() => setRememberKey(true)}
+                      >
+                        {text.rememberDialogConfirm}
+                      </AlertDialogClose>
+                    </div>
+                  </AlertDialogPopup>
+                </AlertDialog>
               </FieldGroup>
             </Section>
           </div>
@@ -2206,7 +2227,7 @@ export function ImageStudio({
               </div>
             ) : isGenerating ? (
               <GenerationSkeleton count={imageCount} workflow={workflow} />
-            ) : (
+            ) : !history.length ? (
               <EmptyCanvas
                 imageCount={imageCount}
                 isCjk={isCjk}
@@ -2215,6 +2236,55 @@ export function ImageStudio({
                 size={size}
                 text={text}
               />
+            ) : null}
+
+            {history.length > 0 && (
+              <div className="flex flex-col gap-6 border-t pt-5">
+                {history.map((pastResult) => (
+                  <section key={pastResult.generation} className="flex flex-col gap-3 opacity-70">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Layers3Icon className="size-3.5" />
+                      <span>{pastResult.prompt.length > 60 ? pastResult.prompt.slice(0, 60) + "…" : pastResult.prompt}</span>
+                      <Badge variant="outline" className="ml-auto rounded-md text-[10px]">
+                        {pastResult.images.length} · {pastResult.size} · {pastResult.outputFormat.toUpperCase()}
+                      </Badge>
+                    </div>
+                    <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(180px,1fr))]">
+                      {pastResult.images.map((image, index) => (
+                        <article
+                          key={`${pastResult.generation}-${index}`}
+                          className="group relative flex flex-col overflow-hidden rounded-lg border bg-card shadow-sm"
+                        >
+                          <div className="relative bg-background">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              alt={`${text.generateImages} ${index + 1}`}
+                              className={cn(
+                                "w-full object-cover",
+                                getSizePreviewClass(pastResult.size)
+                              )}
+                              style={getSizePreviewStyle(pastResult.size)}
+                              src={image.src}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between border-t px-3 py-2">
+                            <span className="text-[11px] text-muted-foreground">
+                              {String(index + 1).padStart(2, "0")}
+                            </span>
+                            <a
+                              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                              download={`imgx-${pastResult.generation}-${index + 1}.${pastResult.outputFormat}`}
+                              href={image.src}
+                            >
+                              <ArrowDownToLineIcon className="size-3" />
+                            </a>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
             )}
           </div>
 
