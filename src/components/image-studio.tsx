@@ -682,6 +682,7 @@ function getGenerationErrorMessage(error: unknown, fallback: string) {
 
 type StudioResponse = {
   endpoint: string
+  id: string
   generation: number
   images: GeneratedImage[]
   model: string
@@ -1405,6 +1406,15 @@ export function ImageStudio({
     }
   }
 
+  function promptToRememberApiKey() {
+    if (!apiKey.trim() || rememberKey) {
+      return false
+    }
+
+    setIsRememberDialogOpen(true)
+    return true
+  }
+
   async function callProxy(requestedCount: number): Promise<{ endpoint: string; images: GeneratedImage[] }> {
     const formData = new FormData()
     const requestPrompt = buildRequestPrompt(prompt, activeSource)
@@ -1469,16 +1479,18 @@ export function ImageStudio({
       return
     }
 
+    if (promptToRememberApiKey()) {
+      return
+    }
+
     setIsGenerating(true)
     setGenerationStartedAt(Date.now())
     setElapsedGenerationSeconds(0)
     setProgress(8)
-    setResult((prev) => {
-      if (prev) {
-        setHistory((h) => [prev, ...h])
-      }
-      return null
-    })
+    if (result) {
+      setHistory((current) => current.some((item) => item.id === result.id) ? current : [result, ...current])
+    }
+    setResult(null)
     setSelectedImageIndex(0)
 
     const total = Math.min(Math.max(imageCount, 1), 4)
@@ -1492,6 +1504,7 @@ export function ImageStudio({
 
       const createResult = (visibleImages: GeneratedImage[]): StudioResponse => ({
         endpoint: collectedEndpoint,
+        id: crypto.randomUUID(),
         generation: nextGeneration,
         images: visibleImages,
         model,
@@ -1977,11 +1990,7 @@ export function ImageStudio({
                       className="studio-control h-11 w-full min-w-0 rounded-md border px-3 py-1 pr-11 font-mono text-xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-primary/20"
                       value={apiKey}
                       onChange={(event) => setApiKey(event.target.value)}
-                      onBlur={() => {
-                        if (apiKey.trim() && !rememberKey) {
-                          setIsRememberDialogOpen(true)
-                        }
-                      }}
+                      onBlur={promptToRememberApiKey}
                     />
                     <button
                       type="button"
@@ -2241,7 +2250,7 @@ export function ImageStudio({
             {history.length > 0 && (
               <div className="flex flex-col gap-6 border-t pt-5">
                 {history.map((pastResult) => (
-                  <section key={pastResult.generation} className="flex flex-col gap-3 opacity-70">
+                  <section key={pastResult.id} className="flex flex-col gap-3 opacity-70">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Layers3Icon className="size-3.5" />
                       <span>{pastResult.prompt.length > 60 ? pastResult.prompt.slice(0, 60) + "…" : pastResult.prompt}</span>
@@ -2252,7 +2261,7 @@ export function ImageStudio({
                     <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(180px,1fr))]">
                       {pastResult.images.map((image, index) => (
                         <article
-                          key={`${pastResult.generation}-${index}`}
+                          key={`${pastResult.id}-${index}`}
                           className="group relative flex flex-col overflow-hidden rounded-lg border bg-card shadow-sm"
                         >
                           <div className="relative bg-background">

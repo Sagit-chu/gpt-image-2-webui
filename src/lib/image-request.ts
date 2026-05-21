@@ -200,6 +200,20 @@ export function extractGeneratedImages(payload: unknown, outputFormat: string) {
   return image ? [image, ...images] : images
 }
 
+export function isContentPolicyViolation(payload: unknown): boolean {
+  if (!isRecord(payload)) {
+    return false
+  }
+
+  const error = isRecord(payload.error) ? payload.error : payload
+  const code = asString(error.code) || ""
+
+  return (
+    code === "content_policy_violation" ||
+    code === "auto_suspected_policy_violation"
+  )
+}
+
 export function getImageApiError(payload: unknown) {
   if (!isRecord(payload)) {
     return undefined
