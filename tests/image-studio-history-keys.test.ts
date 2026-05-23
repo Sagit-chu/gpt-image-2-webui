@@ -12,8 +12,8 @@ assert.match(
 
 assert.match(
   source,
-  /id: crypto\.randomUUID\(\),[\s\S]*?generation: nextGeneration/,
-  "new studio results should get a unique id when created"
+  /id: createClientId\(\),[\s\S]*?generation: nextGeneration/,
+  "new studio results should get a stable client id when created, even without crypto.randomUUID"
 )
 
 assert.match(

@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncEx
 import {
   ArrowDownToLineIcon,
   CheckCircle2Icon,
+  ChevronDownIcon,
   CopyPlusIcon,
   EyeIcon,
   EyeOffIcon,
@@ -684,14 +685,46 @@ type StudioResponse = {
   endpoint: string
   id: string
   generation: number
+  debug?: StudioDebug | null
   images: GeneratedImage[]
   model: string
   outputFormat: string
   prompt: string
   quality: string
+  qualityReported: boolean
   requestedCount: number
   size: string
+  sizeReported: boolean
   sourceLabel?: string
+}
+
+type StudioDebug = {
+  request: {
+    background: string
+    endpoint: string
+    imageCount: number
+    inputFidelity: string | null
+    inputImageCount: number
+    inputImageNames: string[]
+    model: string
+    outputFormat: string
+    promptPreview: string
+    quality: string
+    size: string
+  }
+  response: {
+    background: unknown
+    created: unknown
+    endpoint: string
+    imageCount: number
+    outputFormat: string
+    payloadKeys: string[]
+    quality: string
+    qualityReported: boolean
+    size: string
+    sizeReported: boolean
+    usage: unknown
+  }
 }
 
 type UploadPreview = {
@@ -716,6 +749,32 @@ type StoredConnectionPreferences = {
 
 function formatBytes(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function createClientId() {
+  const uuid = globalThis.crypto?.randomUUID?.()
+
+  if (uuid) {
+    return uuid
+  }
+
+  const bytes = new Uint8Array(16)
+  const cryptoObject = globalThis.crypto
+
+  if (cryptoObject?.getRandomValues) {
+    cryptoObject.getRandomValues(bytes)
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256)
+    }
+  }
+
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")
+
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 function selectValue(value: string | null, fallback: string) {
@@ -870,7 +929,7 @@ async function createGeneratedUploadPreview({
 
   return {
     file,
-    id: `${file.name}-${Date.now()}-${crypto.randomUUID()}`,
+    id: `${file.name}-${Date.now()}-${createClientId()}`,
     url: URL.createObjectURL(file),
   }
 }
@@ -1238,7 +1297,7 @@ export function ImageStudio({
 
       accepted.push({
         file,
-        id: `${file.name}-${file.lastModified}-${crypto.randomUUID()}`,
+        id: `${file.name}-${file.lastModified}-${createClientId()}`,
         url: URL.createObjectURL(file),
       })
     }
@@ -1415,7 +1474,15 @@ export function ImageStudio({
     return true
   }
 
-  async function callProxy(requestedCount: number): Promise<{ endpoint: string; images: GeneratedImage[] }> {
+  async function callProxy(requestedCount: number): Promise<{
+    endpoint: string
+    debug: StudioDebug | null
+    images: GeneratedImage[]
+    quality: string | null
+    qualityReported: boolean
+    size: string | null
+    sizeReported: boolean
+  }> {
     const formData = new FormData()
     const requestPrompt = buildRequestPrompt(prompt, activeSource)
 
@@ -1440,8 +1507,13 @@ export function ImageStudio({
     })
     const payload = await readResponseJson<{
       endpoint?: string
+      debug?: StudioDebug
       error?: string
       images?: GeneratedImage[]
+      quality?: string
+      qualityReported?: boolean
+      size?: string
+      sizeReported?: boolean
     }>(response)
 
     if (!response.ok) {
@@ -1457,7 +1529,12 @@ export function ImageStudio({
 
     return {
       endpoint: payload.endpoint || endpoint,
+      debug: payload.debug || null,
       images: payload.images,
+      quality: payload.quality?.trim() || null,
+      qualityReported: payload.qualityReported === true,
+      size: payload.size?.trim() || null,
+      sizeReported: payload.sizeReported === true,
     }
   }
 
@@ -1501,18 +1578,26 @@ export function ImageStudio({
       const images: GeneratedImage[] = []
       const maxAttempts = total + 2
       let attempts = 0
+      let resultDebug: StudioDebug | null = null
+      let resultQuality = quality
+      let resultQualityReported = false
+      let resultSize = size
+      let resultSizeReported = false
 
       const createResult = (visibleImages: GeneratedImage[]): StudioResponse => ({
         endpoint: collectedEndpoint,
-        id: crypto.randomUUID(),
+        id: createClientId(),
         generation: nextGeneration,
+        debug: resultDebug,
         images: visibleImages,
         model,
         outputFormat,
         prompt: prompt.trim(),
-        quality,
+        quality: resultQuality,
+        qualityReported: resultQualityReported,
         requestedCount: total,
-        size,
+        size: resultSize,
+        sizeReported: resultSizeReported,
         sourceLabel: activeSource?.label,
       })
 
@@ -1532,6 +1617,11 @@ export function ImageStudio({
         try {
           const topUp = await callProxy(1)
           collectedEndpoint = topUp.endpoint
+          resultDebug = topUp.debug || resultDebug
+          resultQuality = topUp.quality || quality
+          resultQualityReported = topUp.qualityReported
+          resultSize = topUp.size || size
+          resultSizeReported = topUp.sizeReported
 
           if (images.length < total) {
             images.push(...topUp.images.slice(0, total - images.length))
@@ -1846,6 +1936,9 @@ export function ImageStudio({
                         </SelectGroup>
                       </SelectContent>
                     </Select>
+                    <FieldDescription className="text-xs">
+                      {text.qualityDescription}
+                    </FieldDescription>
                   </Field>
                   <Field>
                     <FieldLabel className="text-xs font-semibold text-muted-foreground">
@@ -2302,8 +2395,13 @@ export function ImageStudio({
               <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
                 {[
                   [text.summaryModel, result.model],
-                  [text.summarySize, result.size],
-                  [text.summaryQuality, qualityLabelByValue[result.quality] || result.quality],
+                  [text.summarySize, result.sizeReported ? result.size : `${result.size} (${text.summaryRequested})`],
+                  [
+                    text.summaryQuality,
+                    result.qualityReported
+                      ? qualityLabelByValue[result.quality] || result.quality
+                      : `${qualityLabelByValue[result.quality] || result.quality} (${text.summaryRequested})`,
+                  ],
                   [text.summaryFormat, result.outputFormat.toUpperCase()],
                   [
                     text.summaryCount,
@@ -2333,6 +2431,35 @@ export function ImageStudio({
                   </div>
                 ))}
               </div>
+              {result.debug && (
+                <details className="group mt-4 rounded-lg border bg-muted/20 px-4 py-3">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold text-muted-foreground [&::-webkit-details-marker]:hidden">
+                    <span>{text.debugPanelTitle}</span>
+                    <ChevronDownIcon className="size-4 shrink-0 opacity-70" />
+                  </summary>
+                  <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                    {text.debugPanelDescription}
+                  </p>
+                  <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                    <div className="rounded-lg border bg-background/80 p-3">
+                      <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                        {text.debugRequest}
+                      </div>
+                      <pre className="max-h-80 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-[11px] leading-5 text-foreground/80 whitespace-pre-wrap break-words">
+                        {JSON.stringify(result.debug.request, null, 2)}
+                      </pre>
+                    </div>
+                    <div className="rounded-lg border bg-background/80 p-3">
+                      <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                        {text.debugResponse}
+                      </div>
+                      <pre className="max-h-80 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-[11px] leading-5 text-foreground/80 whitespace-pre-wrap break-words">
+                        {JSON.stringify(result.debug.response, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                </details>
+              )}
             </div>
           )}
         </main>

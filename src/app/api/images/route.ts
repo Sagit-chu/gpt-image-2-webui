@@ -57,6 +57,22 @@ function getText(formData: FormData, key: string, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback
 }
 
+function getOptionalPayloadText(payload: unknown, key: string) {
+  const value = getPayloadField(payload, key)
+
+  return typeof value === "string" && value.trim() ? value.trim() : null
+}
+
+function getPayloadKeys(payload: unknown) {
+  return typeof payload === "object" && payload !== null && !Array.isArray(payload)
+    ? Object.keys(payload as Record<string, unknown>)
+    : []
+}
+
+function previewText(value: string, limit = 160) {
+  return value.length > limit ? `${value.slice(0, limit)}…` : value
+}
+
 function getBackground(formData: FormData) {
   const value = getText(formData, "background", "auto")
   return value === "transparent" || value === "opaque" || value === "auto" ? value : "auto"
@@ -113,6 +129,10 @@ function getEditQuality(formData: FormData) {
   return value === "auto" || value === "low" || value === "medium" || value === "high" || value === "standard"
     ? value
     : "auto"
+}
+
+function getEditInputFidelity(quality: string) {
+  return quality === "high" ? "high" : undefined
 }
 
 function getGenerateSize(formData: FormData) {
@@ -183,16 +203,20 @@ export async function POST(request: Request) {
     let payload: unknown
     let requestQuality = "auto"
     let requestSize = "1024x1024"
+    let requestInputFidelity: string | null = null
 
     if (images.length) {
       const quality = getEditQuality(incomingFormData)
+      const inputFidelity = getEditInputFidelity(quality)
       const size = getEditSize(incomingFormData)
 
       requestQuality = quality
       requestSize = size
+      requestInputFidelity = inputFidelity || null
       payload = await client.images.edit({
         background,
         image: images.length === 1 ? images[0] : images,
+        input_fidelity: inputFidelity,
         model,
         n,
         output_format: outputFormat,
@@ -221,6 +245,8 @@ export async function POST(request: Request) {
       extractGeneratedImages(payload, outputFormat),
       outputFormat
     )
+    const reportedQuality = getOptionalPayloadText(payload, "quality")
+    const reportedSize = getOptionalPayloadText(payload, "size")
 
     if (!generatedImages.length) {
       return NextResponse.json(
@@ -236,11 +262,41 @@ export async function POST(request: Request) {
       background: getPayloadField(payload, "background"),
       created: getPayloadField(payload, "created"),
       endpoint,
+      debug: {
+        request: {
+          background,
+          endpoint,
+          imageCount: n,
+          inputFidelity: requestInputFidelity,
+          inputImageCount: images.length,
+          inputImageNames: images.map((image) => image.name),
+          model,
+          outputFormat,
+          promptPreview: previewText(prompt),
+          quality: requestQuality,
+          size: requestSize,
+        },
+        response: {
+          background: getPayloadField(payload, "background"),
+          created: getPayloadField(payload, "created"),
+          endpoint,
+          imageCount: generatedImages.length,
+          outputFormat: getPayloadField(payload, "output_format") || getPayloadField(payload, "outputFormat") || outputFormat,
+          payloadKeys: getPayloadKeys(payload),
+          quality: reportedQuality || requestQuality,
+          qualityReported: Boolean(reportedQuality),
+          size: reportedSize || requestSize,
+          sizeReported: Boolean(reportedSize),
+          usage: getPayloadField(payload, "usage"),
+        },
+      },
       images: generatedImages,
       model,
       outputFormat,
-      quality: getPayloadField(payload, "quality") || requestQuality,
-      size: getPayloadField(payload, "size") || requestSize,
+      quality: reportedQuality || requestQuality,
+      qualityReported: Boolean(reportedQuality),
+      size: reportedSize || requestSize,
+      sizeReported: Boolean(reportedSize),
       usage: getPayloadField(payload, "usage"),
     })
   } catch (error) {
