@@ -6,12 +6,18 @@ const source = readFileSync(join(process.cwd(), "src/components/image-studio.tsx
 
 assert.match(
   source,
-  /function promptToRememberApiKey\(\)\s*\{[\s\S]*?setIsRememberDialogOpen\(true\)[\s\S]*?\}/,
-  "image studio should centralize the API key remember prompt so blur and submit use the same behavior"
+  /function promptToRememberApiKey\(\)\s*\{[\s\S]*?if \(!apiKey\.trim\(\) \|\| rememberKey\) \{\s*return false\s*\}[\s\S]*?setIsRememberDialogOpen\(true\)[\s\S]*?return true[\s\S]*?\}/,
+  "image studio should only open the remember dialog for a non-empty unsaved API key"
 )
 
 assert.match(
   source,
   /if \(promptToRememberApiKey\(\)\) \{\s*return\s*\}/,
   "submitting with an unsaved API key should show the remember prompt before starting generation"
+)
+
+assert.doesNotMatch(
+  source,
+  /if \(!apiKey\.trim\(\)\) \{\s*setIsRememberDialogOpen\(true\)/,
+  "an empty API key should not trigger the remember dialog"
 )

@@ -18,6 +18,9 @@ export const maxDuration = 120
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MIN_CUSTOM_DIMENSION = 64
 const MAX_CUSTOM_DIMENSION = 8192
+const DEFAULT_REQUEST_TIMEOUT_MS = 90_000
+const MIN_REQUEST_TIMEOUT_MS = 20
+const MAX_REQUEST_TIMEOUT_MS = 600_000
 const GENERATE_SIZE_VALUES = new Set([
   "auto",
   "256x256",
@@ -143,9 +146,30 @@ function getEditSize(formData: FormData) {
   return getSize(formData, EDIT_SIZE_VALUES)
 }
 
+function clampRequestTimeoutMs(value: number) {
+  return Math.min(MAX_REQUEST_TIMEOUT_MS, Math.max(MIN_REQUEST_TIMEOUT_MS, Math.round(value)))
+}
+
+function getRequestTimeoutMs(formData: FormData) {
+  const timeoutMs = Number(getText(formData, "timeoutMs"))
+
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    return clampRequestTimeoutMs(timeoutMs)
+  }
+
+  const timeoutSeconds = Number(getText(formData, "timeoutSeconds"))
+
+  if (Number.isFinite(timeoutSeconds) && timeoutSeconds > 0) {
+    return clampRequestTimeoutMs(timeoutSeconds * 1000)
+  }
+
+  return DEFAULT_REQUEST_TIMEOUT_MS
+}
+
 export async function POST(request: Request) {
   let locale = resolveLocale(request.headers.get("accept-language"))
   let endpoint = ""
+  let requestTimeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
 
   try {
     const incomingFormData = await request.formData()
@@ -193,6 +217,7 @@ export async function POST(request: Request) {
     const baseURL = normalizeOpenAIBaseURL(getText(incomingFormData, "endpoint"), locale)
     const outputFormat = getOutputFormat(incomingFormData)
     const imageCount = Number(getText(incomingFormData, "imageCount", "1"))
+    requestTimeoutMs = getRequestTimeoutMs(incomingFormData)
     const background = getBackground(incomingFormData)
     const n = Math.min(Math.max(imageCount, 1), 4)
     const client = new OpenAI({
@@ -223,6 +248,9 @@ export async function POST(request: Request) {
         prompt,
         quality,
         size: size as OpenAI.Images.ImageEditParams["size"],
+      }, {
+        signal: request.signal,
+        timeout: requestTimeoutMs,
       })
     } else {
       const quality = getGenerateQuality(incomingFormData)
@@ -238,6 +266,9 @@ export async function POST(request: Request) {
         prompt,
         quality,
         size: size as OpenAI.Images.ImageGenerateParams["size"],
+      }, {
+        signal: request.signal,
+        timeout: requestTimeoutMs,
       })
     }
 
@@ -275,6 +306,7 @@ export async function POST(request: Request) {
           promptPreview: previewText(prompt),
           quality: requestQuality,
           size: requestSize,
+          timeoutMs: requestTimeoutMs,
         },
         response: {
           background: getPayloadField(payload, "background"),
@@ -300,6 +332,26 @@ export async function POST(request: Request) {
       usage: getPayloadField(payload, "usage"),
     })
   } catch (error) {
+    if (error instanceof OpenAI.APIConnectionTimeoutError) {
+      return NextResponse.json(
+        {
+          endpoint,
+          error: t(locale, "proxyRequestTimeout", { seconds: Math.ceil(requestTimeoutMs / 1000) }),
+        },
+        { status: 504 }
+      )
+    }
+
+    if (error instanceof OpenAI.APIUserAbortError) {
+      return NextResponse.json(
+        {
+          endpoint,
+          error: t(locale, "proxyGenerationFailed"),
+        },
+        { status: 499 }
+      )
+    }
+
     if (error instanceof OpenAI.APIError) {
       if (isContentPolicyViolation(error.error)) {
         return NextResponse.json(

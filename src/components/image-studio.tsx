@@ -68,6 +68,7 @@ import {
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { type GeneratedImage } from "@/lib/image-request"
@@ -95,6 +96,9 @@ const MAX_UPLOADS = 4
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
 const DEFAULT_ENDPOINT = "https://api.openai.com/v1"
+const DEFAULT_REQUEST_TIMEOUT_SECONDS = 90
+const MIN_REQUEST_TIMEOUT_SECONDS = 5
+const MAX_REQUEST_TIMEOUT_SECONDS = 600
 const CONNECTION_PREFERENCES_KEY = "imgx.connectionPreferences"
 const LEGACY_API_KEY_KEY = "imgx.apiKey"
 const LEGACY_REMEMBER_KEY_KEY = "imgx.rememberKey"
@@ -676,9 +680,33 @@ const remixRecipeItems: {
 type PresetSizeValue = (typeof PRESET_SIZE_VALUES)[number]
 type SizeValue = PresetSizeValue | (string & {})
 type SizeSelectValue = PresetSizeValue | typeof CUSTOM_SIZE_OPTION_VALUE
+type GenerationControlErrorName = "GenerationAbortError" | "GenerationTimeoutError"
 
 function getGenerationErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
+}
+
+function createGenerationControlError(name: GenerationControlErrorName, message: string) {
+  const error = new Error(message)
+  error.name = name
+  return error
+}
+
+function isGenerationControlError(error: unknown, name: GenerationControlErrorName) {
+  return error instanceof Error && error.name === name
+}
+
+function normalizeRequestTimeoutSeconds(value: string) {
+  const parsed = Number(value)
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_REQUEST_TIMEOUT_SECONDS
+  }
+
+  return Math.min(
+    MAX_REQUEST_TIMEOUT_SECONDS,
+    Math.max(MIN_REQUEST_TIMEOUT_SECONDS, Math.round(parsed))
+  )
 }
 
 type StudioResponse = {
@@ -711,6 +739,7 @@ type StudioDebug = {
     promptPreview: string
     quality: string
     size: string
+    timeoutMs: number
   }
   response: {
     background: unknown
@@ -1117,6 +1146,8 @@ export function ImageStudio({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const activeSourceRef = useRef<ActiveSource | null>(null)
   const uploadsRef = useRef<UploadPreview[]>([])
+  const generationAbortControllerRef = useRef<AbortController | null>(null)
+  const generationTimeoutRef = useRef<number | null>(null)
   const progressResetTimeoutRef = useRef<number | null>(null)
   const referenceDropDepthRef = useRef(0)
   const browserLocale = useSyncExternalStore(
@@ -1129,11 +1160,16 @@ export function ImageStudio({
   const [isApiKeyVisible, setIsApiKeyVisible] = useState(false)
   const [rememberKey, setRememberKey] = useState(false)
   const [isRememberDialogOpen, setIsRememberDialogOpen] = useState(false)
+  const [isMissingApiKeyDialogOpen, setIsMissingApiKeyDialogOpen] = useState(false)
+  const [pendingGenerationAfterApiKey, setPendingGenerationAfterApiKey] = useState(false)
+  const [missingApiKeyValue, setMissingApiKeyValue] = useState("")
+  const [missingApiKeyRemember, setMissingApiKeyRemember] = useState(false)
   const [hasLoadedPreferences, setHasLoadedPreferences] = useState(false)
   const [customPrompt, setCustomPrompt] = useState<string | null>(null)
   const [selectedPromptPresetIndex, setSelectedPromptPresetIndex] = useState(0)
   const [endpoint, setEndpoint] = useState(fixedBaseUrl || DEFAULT_ENDPOINT)
   const [model, setModel] = useState(DEFAULT_MODEL)
+  const [requestTimeoutSeconds, setRequestTimeoutSeconds] = useState(String(DEFAULT_REQUEST_TIMEOUT_SECONDS))
   const [uploads, setUploads] = useState<UploadPreview[]>([])
   const [isReferenceDropActive, setIsReferenceDropActive] = useState(false)
   const [sizeMode, setSizeMode] = useState<SizeSelectValue>(DEFAULT_SIZE)
@@ -1165,6 +1201,14 @@ export function ImageStudio({
   const qualityItems = useMemo(() => getQualityItems(locale), [locale])
   const formatItems = useMemo(() => getFormatItems(), [])
   const backgroundItems = useMemo(() => getBackgroundItems(locale), [locale])
+  const normalizedRequestTimeoutSeconds = useMemo(
+    () => normalizeRequestTimeoutSeconds(requestTimeoutSeconds),
+    [requestTimeoutSeconds]
+  )
+  const requestTimeoutMs = useMemo(
+    () => normalizedRequestTimeoutSeconds * 1000,
+    [normalizedRequestTimeoutSeconds]
+  )
   const qualityLabelByValue = useMemo(
     () => Object.fromEntries(qualityItems.map((item) => [item.value, item.label])),
     [qualityItems]
@@ -1274,6 +1318,14 @@ export function ImageStudio({
       if (progressResetTimeoutRef.current) {
         window.clearTimeout(progressResetTimeoutRef.current)
       }
+
+      if (generationTimeoutRef.current) {
+        window.clearTimeout(generationTimeoutRef.current)
+      }
+
+      generationAbortControllerRef.current?.abort(
+        createGenerationControlError("GenerationAbortError", "component-unmounted")
+      )
     }
   }, [])
 
@@ -1474,7 +1526,46 @@ export function ImageStudio({
     return true
   }
 
-  async function callProxy(requestedCount: number): Promise<{
+  function handleMissingApiKeyDialogOpenChange(open: boolean) {
+    setIsMissingApiKeyDialogOpen(open)
+
+    if (!open) {
+      setPendingGenerationAfterApiKey(false)
+      setMissingApiKeyValue("")
+    }
+  }
+
+  function handleMissingApiKeyDialogConfirm() {
+    if (!pendingGenerationAfterApiKey) {
+      return
+    }
+
+    const nextApiKey = missingApiKeyValue.trim()
+
+    if (!nextApiKey) {
+      toast.error(text.proxyApiKeyRequired)
+      return
+    }
+
+    setIsMissingApiKeyDialogOpen(false)
+    setPendingGenerationAfterApiKey(false)
+    setRememberKey(missingApiKeyRemember)
+    setApiKey(nextApiKey)
+    setMissingApiKeyValue("")
+    void startGeneration(nextApiKey, { skipRememberPrompt: true })
+  }
+
+  const stopGeneration = useCallback(() => {
+    generationAbortControllerRef.current?.abort(
+      createGenerationControlError("GenerationAbortError", text.generationStopped)
+    )
+  }, [text.generationStopped])
+
+  async function callProxy(
+    requestedCount: number,
+    generationController: AbortController,
+    requestApiKey: string
+  ): Promise<{
     endpoint: string
     debug: StudioDebug | null
     images: GeneratedImage[]
@@ -1486,7 +1577,7 @@ export function ImageStudio({
     const formData = new FormData()
     const requestPrompt = buildRequestPrompt(prompt, activeSource)
 
-    formData.append("apiKey", apiKey.trim())
+    formData.append("apiKey", requestApiKey.trim())
     formData.append("background", background)
     formData.append("endpoint", endpoint.trim())
     formData.append("imageCount", String(requestedCount))
@@ -1496,6 +1587,7 @@ export function ImageStudio({
     formData.append("prompt", requestPrompt)
     formData.append("quality", quality)
     formData.append("size", size)
+    formData.append("timeoutMs", String(requestTimeoutMs))
 
     for (const upload of inputUploads) {
       formData.append("images", upload.file, upload.file.name)
@@ -1504,6 +1596,7 @@ export function ImageStudio({
     const response = await fetch("/api/images", {
       method: "POST",
       body: formData,
+      signal: generationController.signal,
     })
     const payload = await readResponseJson<{
       endpoint?: string
@@ -1538,9 +1631,10 @@ export function ImageStudio({
     }
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-
+  async function startGeneration(
+    requestApiKey?: string,
+    options?: { skipRememberPrompt?: boolean }
+  ) {
     if (progressResetTimeoutRef.current) {
       window.clearTimeout(progressResetTimeoutRef.current)
       progressResetTimeoutRef.current = null
@@ -1556,9 +1650,33 @@ export function ImageStudio({
       return
     }
 
-    if (promptToRememberApiKey()) {
+    const effectiveApiKey = (requestApiKey ?? apiKey).trim()
+
+    if (!effectiveApiKey) {
+      setMissingApiKeyValue("")
+      setMissingApiKeyRemember(rememberKey)
+      setPendingGenerationAfterApiKey(true)
+      setIsMissingApiKeyDialogOpen(true)
       return
     }
+
+    if (!options?.skipRememberPrompt) {
+      if (promptToRememberApiKey()) {
+        return
+      }
+    }
+
+    const generationController = new AbortController()
+
+    generationAbortControllerRef.current = generationController
+    generationTimeoutRef.current = window.setTimeout(() => {
+      generationController.abort(
+        createGenerationControlError(
+          "GenerationTimeoutError",
+          t(locale, "generationTimedOut", { seconds: normalizedRequestTimeoutSeconds })
+        )
+      )
+    }, requestTimeoutMs)
 
     setIsGenerating(true)
     setGenerationStartedAt(Date.now())
@@ -1573,6 +1691,7 @@ export function ImageStudio({
     const total = Math.min(Math.max(imageCount, 1), 4)
     let collectedEndpoint = ""
     let firstError: unknown = null
+    let completedCount = 0
 
     try {
       const images: GeneratedImage[] = []
@@ -1608,6 +1727,7 @@ export function ImageStudio({
           return
         }
 
+        completedCount = visibleImages.length
         setResult(createResult(visibleImages))
         setSelectedImageIndex((current) => current < visibleImages.length ? current : 0)
         setProgress(Math.min(95, 8 + Math.round((visibleImages.length / total) * 87)))
@@ -1615,7 +1735,7 @@ export function ImageStudio({
 
       const runRequest = async () => {
         try {
-          const topUp = await callProxy(1)
+          const topUp = await callProxy(1, generationController, effectiveApiKey)
           collectedEndpoint = topUp.endpoint
           resultDebug = topUp.debug || resultDebug
           resultQuality = topUp.quality || quality
@@ -1628,6 +1748,13 @@ export function ImageStudio({
             publishResult()
           }
         } catch (error) {
+          if (
+            isGenerationControlError(error, "GenerationAbortError") ||
+            isGenerationControlError(error, "GenerationTimeoutError")
+          ) {
+            throw error
+          }
+
           if (!firstError) {
             firstError = error
           }
@@ -1649,6 +1776,7 @@ export function ImageStudio({
 
       const visibleImages = images.slice(0, total)
 
+      completedCount = visibleImages.length
       setResult(createResult(visibleImages))
       setSelectedImageIndex((current) => current < visibleImages.length ? current : 0)
       setProgress(100)
@@ -1677,13 +1805,46 @@ export function ImageStudio({
         setGenerationStartedAt(null)
       }, 900)
     } catch (error) {
-      toast.error(getGenerationErrorMessage(error, text.generationFailed))
+      if (isGenerationControlError(error, "GenerationAbortError")) {
+        toast.warning(
+          completedCount > 0
+            ? t(locale, "generationStoppedPartial", {
+                count: completedCount,
+                suffix: pluralSuffix(locale, completedCount),
+              })
+            : text.generationStopped
+        )
+      } else if (isGenerationControlError(error, "GenerationTimeoutError")) {
+        toast.error(
+          completedCount > 0
+            ? t(locale, "generationTimedOutPartial", {
+                count: completedCount,
+                seconds: normalizedRequestTimeoutSeconds,
+                suffix: pluralSuffix(locale, completedCount),
+              })
+            : getGenerationErrorMessage(error, text.generationFailed)
+        )
+      } else {
+        toast.error(getGenerationErrorMessage(error, text.generationFailed))
+      }
+
       setProgress(0)
       setElapsedGenerationSeconds(0)
       setGenerationStartedAt(null)
     } finally {
+      if (generationTimeoutRef.current) {
+        window.clearTimeout(generationTimeoutRef.current)
+        generationTimeoutRef.current = null
+      }
+
+      generationAbortControllerRef.current = null
       setIsGenerating(false)
     }
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    void startGeneration()
   }
 
   return (
@@ -2068,6 +2229,29 @@ export function ImageStudio({
 
                 <Field>
                   <FieldLabel
+                    htmlFor="request-timeout"
+                    className="text-xs font-semibold text-muted-foreground"
+                  >
+                    {text.requestTimeout}
+                  </FieldLabel>
+                  <Input
+                    id="request-timeout"
+                    min={MIN_REQUEST_TIMEOUT_SECONDS}
+                    max={MAX_REQUEST_TIMEOUT_SECONDS}
+                    step="1"
+                    type="number"
+                    inputMode="numeric"
+                    className="studio-control rounded-md font-mono text-xs focus-visible:border-primary focus-visible:ring-primary/20"
+                    value={requestTimeoutSeconds}
+                    onChange={(event) => setRequestTimeoutSeconds(event.target.value)}
+                  />
+                  <FieldDescription className="text-xs">
+                    {t(locale, "requestTimeoutDescription", { seconds: normalizedRequestTimeoutSeconds })}
+                  </FieldDescription>
+                </Field>
+
+                <Field>
+                  <FieldLabel
                     htmlFor="api-key"
                     className="text-xs font-semibold text-muted-foreground"
                   >
@@ -2118,35 +2302,104 @@ export function ImageStudio({
                     </div>
                   </AlertDialogPopup>
                 </AlertDialog>
+
+                <AlertDialog open={isMissingApiKeyDialogOpen} onOpenChange={handleMissingApiKeyDialogOpenChange}>
+                  <AlertDialogPopup>
+                    <AlertDialogTitle>{text.missingApiKeyDialogTitle}</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {text.missingApiKeyDialogDescription || "请在 API 密钥页面创建生图专用 key，粘贴在此处，开始使用"}
+                    </AlertDialogDescription>
+                    <FieldGroup className="mt-4 gap-4">
+                      <Field>
+                        <FieldLabel className="text-xs font-semibold text-muted-foreground">
+                          {text.apiKey}
+                        </FieldLabel>
+                        <Input
+                          autoFocus
+                          autoComplete="off"
+                          spellCheck={false}
+                          placeholder="sk-..."
+                          className="studio-control h-11 rounded-md font-mono text-xs focus-visible:border-primary focus-visible:ring-primary/20"
+                          value={missingApiKeyValue}
+                          onChange={(event) => setMissingApiKeyValue(event.target.value)}
+                        />
+                      </Field>
+                      <div className="flex items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-foreground">
+                            {text.rememberDialogTitle}
+                          </div>
+                          <div className="text-[11px] leading-4 text-muted-foreground">
+                            {text.rememberDialogDescription}
+                          </div>
+                        </div>
+                        <Switch
+                          size="sm"
+                          checked={missingApiKeyRemember}
+                          onCheckedChange={setMissingApiKeyRemember}
+                        />
+                      </div>
+                    </FieldGroup>
+                    <div className="mt-4 flex justify-end gap-2">
+                      <AlertDialogClose
+                        className="inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium transition-colors hover:bg-muted"
+                      >
+                        {text.rememberDialogCancel}
+                      </AlertDialogClose>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-8 rounded-md px-3 text-xs font-medium"
+                        onClick={handleMissingApiKeyDialogConfirm}
+                      >
+                        {text.missingApiKeyDialogConfirm}
+                      </Button>
+                    </div>
+                  </AlertDialogPopup>
+                </AlertDialog>
               </FieldGroup>
             </Section>
           </div>
 
           <div className="sticky bottom-0 mt-auto flex flex-col gap-3 border-t bg-background/80 px-4 py-4 backdrop-blur-xl">
-            <Button
-              type="submit"
-              size="lg"
-              disabled={isGenerating}
-              className="studio-primary-button h-[52px] w-full justify-center rounded-lg text-base font-semibold tracking-tight"
-            >
-              <span
-                aria-hidden="true"
-                data-icon="inline-start"
-                className="relative grid size-4 place-items-center"
+            <div className="flex gap-2">
+              <Button
+                type="submit"
+                size="lg"
+                disabled={isGenerating}
+                className="studio-primary-button h-[52px] flex-1 justify-center rounded-lg text-base font-semibold tracking-tight"
               >
-                <LoaderCircleIcon
-                  className={cn(
-                    "absolute transition-opacity",
-                    isGenerating ? "animate-spin opacity-100" : "opacity-0"
-                  )}
-                />
-                <PlayIcon className={cn("transition-opacity", isGenerating ? "opacity-0" : "opacity-100")} />
-              </span>
-              {isGenerating ? text.generating : activeSource ? workflow.continueGeneration : text.generateImages}
-              <span className="ml-2 text-xs font-medium opacity-80">
-                ×{imageCount}
-              </span>
-            </Button>
+                <span
+                  aria-hidden="true"
+                  data-icon="inline-start"
+                  className="relative grid size-4 place-items-center"
+                >
+                  <LoaderCircleIcon
+                    className={cn(
+                      "absolute transition-opacity",
+                      isGenerating ? "animate-spin opacity-100" : "opacity-0"
+                    )}
+                  />
+                  <PlayIcon className={cn("transition-opacity", isGenerating ? "opacity-0" : "opacity-100")} />
+                </span>
+                {isGenerating ? text.generating : activeSource ? workflow.continueGeneration : text.generateImages}
+                <span className="ml-2 text-xs font-medium opacity-80">
+                  ×{imageCount}
+                </span>
+              </Button>
+              {isGenerating && (
+                <Button
+                  type="button"
+                  size="lg"
+                  variant="outline"
+                  onClick={stopGeneration}
+                  className="h-[52px] shrink-0 rounded-lg px-4 text-sm font-semibold"
+                >
+                  <XIcon data-icon="inline-start" />
+                  {text.stopGeneration}
+                </Button>
+              )}
+            </div>
             <Progress
               value={progress}
               className={cn(
