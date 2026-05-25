@@ -12,20 +12,14 @@ assert.match(
 
 assert.match(
   source,
-  /formData\.append\("timeoutMs", String\(requestTimeoutMs\)\)/,
-  "image studio should send the configured timeout to the server proxy"
-)
-
-assert.match(
-  source,
   /new AbortController\(\)/,
   "image studio should create an AbortController for each generation run"
 )
 
 assert.match(
   source,
-  /signal:\s*generationController\.signal/,
-  "proxy requests should use the generation abort signal so the stop action cancels in-flight work"
+  /runImageStudioSession(?:<[^>]+>)?\(\{[\s\S]*signal:\s*generationController\.signal,[\s\S]*timeoutMs:\s*requestTimeoutMs,[\s\S]*\}\)/,
+  "image studio should pass the generation abort signal and timeout through the shared session helper"
 )
 
 assert.match(
