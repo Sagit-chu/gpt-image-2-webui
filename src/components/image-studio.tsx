@@ -71,8 +71,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  IMAGE_STUDIO_HISTORY_LIMIT,
+  appendImageStudioHistory,
+} from "@/lib/image-studio-generation"
 import { type GeneratedImage } from "@/lib/image-request"
-import { readResponseJson } from "@/lib/http-response"
+import { runImageStudioSession } from "@/lib/image-studio-session"
 import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE_KEY,
@@ -1561,76 +1565,6 @@ export function ImageStudio({
     )
   }, [text.generationStopped])
 
-  async function callProxy(
-    requestedCount: number,
-    generationController: AbortController,
-    requestApiKey: string
-  ): Promise<{
-    endpoint: string
-    debug: StudioDebug | null
-    images: GeneratedImage[]
-    quality: string | null
-    qualityReported: boolean
-    size: string | null
-    sizeReported: boolean
-  }> {
-    const formData = new FormData()
-    const requestPrompt = buildRequestPrompt(prompt, activeSource)
-
-    formData.append("apiKey", requestApiKey.trim())
-    formData.append("background", background)
-    formData.append("endpoint", endpoint.trim())
-    formData.append("imageCount", String(requestedCount))
-    formData.append("locale", locale)
-    formData.append("model", model)
-    formData.append("outputFormat", outputFormat)
-    formData.append("prompt", requestPrompt)
-    formData.append("quality", quality)
-    formData.append("size", size)
-    formData.append("timeoutMs", String(requestTimeoutMs))
-
-    for (const upload of inputUploads) {
-      formData.append("images", upload.file, upload.file.name)
-    }
-
-    const response = await fetch("/api/images", {
-      method: "POST",
-      body: formData,
-      signal: generationController.signal,
-    })
-    const payload = await readResponseJson<{
-      endpoint?: string
-      debug?: StudioDebug
-      error?: string
-      images?: GeneratedImage[]
-      quality?: string
-      qualityReported?: boolean
-      size?: string
-      sizeReported?: boolean
-    }>(response)
-
-    if (!response.ok) {
-      throw new Error(
-        payload?.error ||
-        t(locale, "requestFailedStatus", { status: response.status })
-      )
-    }
-
-    if (!payload?.images?.length) {
-      throw new Error(t(locale, "noImageInPayload"))
-    }
-
-    return {
-      endpoint: payload.endpoint || endpoint,
-      debug: payload.debug || null,
-      images: payload.images,
-      quality: payload.quality?.trim() || null,
-      qualityReported: payload.qualityReported === true,
-      size: payload.size?.trim() || null,
-      sizeReported: payload.sizeReported === true,
-    }
-  }
-
   async function startGeneration(
     requestApiKey?: string,
     options?: { skipRememberPrompt?: boolean }
@@ -1683,20 +1617,17 @@ export function ImageStudio({
     setElapsedGenerationSeconds(0)
     setProgress(8)
     if (result) {
-      setHistory((current) => current.some((item) => item.id === result.id) ? current : [result, ...current])
+      setHistory((current) => appendImageStudioHistory(current, result, IMAGE_STUDIO_HISTORY_LIMIT))
     }
     setResult(null)
     setSelectedImageIndex(0)
 
     const total = Math.min(Math.max(imageCount, 1), 4)
+    const requestPrompt = buildRequestPrompt(prompt, activeSource)
     let collectedEndpoint = ""
-    let firstError: unknown = null
     let completedCount = 0
 
     try {
-      const images: GeneratedImage[] = []
-      const maxAttempts = total + 2
-      let attempts = 0
       let resultDebug: StudioDebug | null = null
       let resultQuality = quality
       let resultQualityReported = false
@@ -1720,9 +1651,7 @@ export function ImageStudio({
         sourceLabel: activeSource?.label,
       })
 
-      const publishResult = () => {
-        const visibleImages = images.slice(0, total)
-
+      const publishResult = (visibleImages: GeneratedImage[]) => {
         if (!visibleImages.length) {
           return
         }
@@ -1733,60 +1662,65 @@ export function ImageStudio({
         setProgress(Math.min(95, 8 + Math.round((visibleImages.length / total) * 87)))
       }
 
-      const runRequest = async () => {
-        try {
-          const topUp = await callProxy(1, generationController, effectiveApiKey)
-          collectedEndpoint = topUp.endpoint
-          resultDebug = topUp.debug || resultDebug
-          resultQuality = topUp.quality || quality
-          resultQualityReported = topUp.qualityReported
-          resultSize = topUp.size || size
-          resultSizeReported = topUp.sizeReported
-
-          if (images.length < total) {
-            images.push(...topUp.images.slice(0, total - images.length))
-            publishResult()
-          }
-        } catch (error) {
-          if (
-            isGenerationControlError(error, "GenerationAbortError") ||
-            isGenerationControlError(error, "GenerationTimeoutError")
-          ) {
-            throw error
-          }
-
-          if (!firstError) {
-            firstError = error
-          }
-        }
+      const applyProxyResult = (proxyResult: {
+        debug: StudioDebug | null
+        endpoint: string
+        quality: string | null
+        qualityReported: boolean
+        size: string | null
+        sizeReported: boolean
+      }) => {
+        collectedEndpoint = proxyResult.endpoint
+        resultDebug = proxyResult.debug || resultDebug
+        resultQuality = proxyResult.quality || quality
+        resultQualityReported = proxyResult.qualityReported
+        resultSize = proxyResult.size || size
+        resultSizeReported = proxyResult.sizeReported
       }
 
-      while (images.length < total && attempts < maxAttempts) {
-        const batchSize = Math.min(total - images.length, maxAttempts - attempts)
-        attempts += batchSize
+      const sessionResult = await runImageStudioSession<StudioDebug>({
+        apiKey: effectiveApiKey,
+        background,
+        endpoint: endpoint.trim(),
+        imageCount: total,
+        images: inputUploads.map((upload) => upload.file),
+        isControlError: (error) => (
+          isGenerationControlError(error, "GenerationAbortError") ||
+          isGenerationControlError(error, "GenerationTimeoutError")
+        ),
+        locale,
+        model,
+        onImagesUpdated: publishResult,
+        onProxyResult: applyProxyResult,
+        outputFormat,
+        prompt: requestPrompt,
+        quality,
+        signal: generationController.signal,
+        size,
+        timeoutMs: requestTimeoutMs,
+      })
 
-        await Promise.all(Array.from({ length: batchSize }, runRequest))
-      }
-
-      if (!images.length) {
-        throw firstError instanceof Error
-          ? firstError
+      if (!sessionResult.images.length) {
+        throw sessionResult.firstError instanceof Error
+          ? sessionResult.firstError
           : new Error(text.allRequestsFailed)
       }
 
-      const visibleImages = images.slice(0, total)
+      const visibleImages = sessionResult.images.slice(0, total)
 
       completedCount = visibleImages.length
       setResult(createResult(visibleImages))
       setSelectedImageIndex((current) => current < visibleImages.length ? current : 0)
       setProgress(100)
 
-      if (visibleImages.length < total && firstError) {
+      if (sessionResult.isPartial) {
         toast.warning(
           t(locale, "generatedPartialWarning", {
             count: visibleImages.length,
             total,
-            error: getGenerationErrorMessage(firstError, String(firstError)),
+            error: sessionResult.firstError
+              ? getGenerationErrorMessage(sessionResult.firstError, text.generationFailed)
+              : text.generationFailed,
           })
         )
       } else {
@@ -2618,6 +2552,8 @@ export function ImageStudio({
                                 "w-full object-cover",
                                 getSizePreviewClass(pastResult.size)
                               )}
+                              decoding="async"
+                              loading="lazy"
                               style={getSizePreviewStyle(pastResult.size)}
                               src={image.src}
                             />
