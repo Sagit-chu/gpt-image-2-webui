@@ -1,6 +1,6 @@
 "use client"
 
-import type { CSSProperties, DragEvent } from "react"
+import type { CSSProperties, DragEvent, FocusEvent } from "react"
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import {
   ArrowDownToLineIcon,
@@ -56,7 +56,6 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -100,7 +99,7 @@ const MAX_UPLOADS = 4
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
 const DEFAULT_ENDPOINT = "https://api.openai.com/v1"
-const DEFAULT_REQUEST_TIMEOUT_SECONDS = 90
+const DEFAULT_REQUEST_TIMEOUT_SECONDS = 180
 const MIN_REQUEST_TIMEOUT_SECONDS = 5
 const MAX_REQUEST_TIMEOUT_SECONDS = 600
 const CONNECTION_PREFERENCES_KEY = "imgx.connectionPreferences"
@@ -1154,6 +1153,9 @@ export function ImageStudio({
   const generationTimeoutRef = useRef<number | null>(null)
   const progressResetTimeoutRef = useRef<number | null>(null)
   const referenceDropDepthRef = useRef(0)
+  const apiKeyEditedBeforeHydrationRef = useRef(false)
+  const endpointEditedBeforeHydrationRef = useRef(false)
+  const rememberKeyEditedBeforeHydrationRef = useRef(false)
   const browserLocale = useSyncExternalStore(
     subscribeToLocalePreferenceChange,
     getPreferredClientLocale,
@@ -1164,6 +1166,7 @@ export function ImageStudio({
   const [isApiKeyVisible, setIsApiKeyVisible] = useState(false)
   const [rememberKey, setRememberKey] = useState(false)
   const [isRememberDialogOpen, setIsRememberDialogOpen] = useState(false)
+  const [pendingGenerationAfterRemember, setPendingGenerationAfterRemember] = useState(false)
   const [isMissingApiKeyDialogOpen, setIsMissingApiKeyDialogOpen] = useState(false)
   const [pendingGenerationAfterApiKey, setPendingGenerationAfterApiKey] = useState(false)
   const [missingApiKeyValue, setMissingApiKeyValue] = useState("")
@@ -1252,9 +1255,9 @@ export function ImageStudio({
     const timeoutId = window.setTimeout(() => {
       const preferences = readStoredConnectionPreferences()
 
-      setRememberKey(preferences.remember)
-      setApiKey(preferences.apiKey)
-      setEndpoint(fixedBaseUrl || preferences.endpoint)
+      setRememberKey((current) => rememberKeyEditedBeforeHydrationRef.current ? current : preferences.remember)
+      setApiKey((current) => apiKeyEditedBeforeHydrationRef.current ? current : preferences.apiKey)
+      setEndpoint((current) => fixedBaseUrl || (endpointEditedBeforeHydrationRef.current ? current : preferences.endpoint))
 
       setHasLoadedPreferences(true)
     }, 0)
@@ -1521,13 +1524,42 @@ export function ImageStudio({
     }
   }
 
-  function promptToRememberApiKey() {
+  function promptToRememberApiKey(event?: FocusEvent<HTMLInputElement>) {
     if (!apiKey.trim() || rememberKey) {
       return false
     }
 
+    if (event?.relatedTarget instanceof HTMLButtonElement && event.relatedTarget.type === "submit") {
+      setPendingGenerationAfterRemember(true)
+    }
+
     setIsRememberDialogOpen(true)
     return true
+  }
+
+  function handleRememberDialogOpenChange(open: boolean) {
+    setIsRememberDialogOpen(open)
+
+    if (!open) {
+      setPendingGenerationAfterRemember(false)
+    }
+  }
+
+  function handleRememberDialogConfirm() {
+    setIsRememberDialogOpen(false)
+
+    if (!hasLoadedPreferences) {
+      rememberKeyEditedBeforeHydrationRef.current = true
+    }
+
+    setRememberKey(true)
+
+    if (!pendingGenerationAfterRemember) {
+      return
+    }
+
+    setPendingGenerationAfterRemember(false)
+    void startGeneration(undefined, { skipRememberPrompt: true })
   }
 
   function handleMissingApiKeyDialogOpenChange(open: boolean) {
@@ -1553,6 +1585,12 @@ export function ImageStudio({
 
     setIsMissingApiKeyDialogOpen(false)
     setPendingGenerationAfterApiKey(false)
+
+    if (!hasLoadedPreferences) {
+      rememberKeyEditedBeforeHydrationRef.current = true
+      apiKeyEditedBeforeHydrationRef.current = true
+    }
+
     setRememberKey(missingApiKeyRemember)
     setApiKey(nextApiKey)
     setMissingApiKeyValue("")
@@ -1595,9 +1633,13 @@ export function ImageStudio({
     }
 
     if (!options?.skipRememberPrompt) {
+      setPendingGenerationAfterRemember(true)
+
       if (promptToRememberApiKey()) {
         return
       }
+
+      setPendingGenerationAfterRemember(false)
     }
 
     const generationController = new AbortController()
@@ -1993,7 +2035,7 @@ export function ImageStudio({
                     </SelectContent>
                   </Select>
                   {isCustomSize && (
-                    <Input
+                    <input
                       aria-invalid={!customSizeValue}
                       className="studio-control mt-2 h-11 rounded-md font-mono text-xs"
                       inputMode="text"
@@ -2150,14 +2192,20 @@ export function ImageStudio({
                   >
                     {text.baseUrl}
                   </FieldLabel>
-                  <Input
-                    id="endpoint"
-                    className="studio-control rounded-md font-mono text-xs focus-visible:border-primary focus-visible:ring-primary/20"
-                    value={endpoint}
-                    readOnly={isBaseUrlLocked}
-                    aria-readonly={isBaseUrlLocked}
-                    onChange={isBaseUrlLocked ? undefined : (event) => setEndpoint(event.target.value)}
-                  />
+                    <input
+                      id="endpoint"
+                      className="studio-control rounded-md font-mono text-xs focus-visible:border-primary focus-visible:ring-primary/20"
+                      value={endpoint}
+                      readOnly={isBaseUrlLocked}
+                      aria-readonly={isBaseUrlLocked}
+                      onChange={isBaseUrlLocked ? undefined : (event) => {
+                        if (!hasLoadedPreferences) {
+                          endpointEditedBeforeHydrationRef.current = true
+                        }
+
+                        setEndpoint(event.target.value)
+                      }}
+                    />
                   <FieldDescription className="text-xs">{text.baseUrlDescription}</FieldDescription>
                 </Field>
 
@@ -2168,10 +2216,10 @@ export function ImageStudio({
                   >
                     {text.requestTimeout}
                   </FieldLabel>
-                  <Input
-                    id="request-timeout"
-                    min={MIN_REQUEST_TIMEOUT_SECONDS}
-                    max={MAX_REQUEST_TIMEOUT_SECONDS}
+                    <input
+                      id="request-timeout"
+                      min={MIN_REQUEST_TIMEOUT_SECONDS}
+                      max={MAX_REQUEST_TIMEOUT_SECONDS}
                     step="1"
                     type="number"
                     inputMode="numeric"
@@ -2200,7 +2248,13 @@ export function ImageStudio({
                       type={isApiKeyVisible ? "text" : "password"}
                       className="studio-control h-11 w-full min-w-0 rounded-md border px-3 py-1 pr-11 font-mono text-xs transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-3 focus-visible:ring-primary/20"
                       value={apiKey}
-                      onChange={(event) => setApiKey(event.target.value)}
+                      onChange={(event) => {
+                        if (!hasLoadedPreferences) {
+                          apiKeyEditedBeforeHydrationRef.current = true
+                        }
+
+                        setApiKey(event.target.value)
+                      }}
                       onBlur={promptToRememberApiKey}
                     />
                     <button
@@ -2217,7 +2271,7 @@ export function ImageStudio({
                   </div>
                 </Field>
 
-                <AlertDialog open={isRememberDialogOpen} onOpenChange={setIsRememberDialogOpen}>
+                <AlertDialog open={isRememberDialogOpen} onOpenChange={handleRememberDialogOpenChange}>
                   <AlertDialogPopup>
                     <AlertDialogTitle>{text.rememberDialogTitle}</AlertDialogTitle>
                     <AlertDialogDescription>{text.rememberDialogDescription}</AlertDialogDescription>
@@ -2227,12 +2281,14 @@ export function ImageStudio({
                       >
                         {text.rememberDialogCancel}
                       </AlertDialogClose>
-                      <AlertDialogClose
-                        className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                        onClick={() => setRememberKey(true)}
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-8 rounded-md px-3 text-xs font-medium"
+                        onClick={handleRememberDialogConfirm}
                       >
                         {text.rememberDialogConfirm}
-                      </AlertDialogClose>
+                      </Button>
                     </div>
                   </AlertDialogPopup>
                 </AlertDialog>
@@ -2248,7 +2304,7 @@ export function ImageStudio({
                         <FieldLabel className="text-xs font-semibold text-muted-foreground">
                           {text.apiKey}
                         </FieldLabel>
-                        <Input
+                        <input
                           autoFocus
                           autoComplete="off"
                           spellCheck={false}

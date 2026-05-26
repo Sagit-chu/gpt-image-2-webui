@@ -33,3 +33,9 @@ assert.match(
   /setIsMissingApiKeyDialogOpen\(false\)[\s\S]*?setPendingGenerationAfterApiKey\(false\)[\s\S]*?startGeneration\(/,
   "confirming the missing-key dialog should resume the blocked generation"
 )
+
+assert.match(
+  source,
+  /function handleMissingApiKeyDialogConfirm\(\) \{[\s\S]*?if \(!hasLoadedPreferences\) \{\s*rememberKeyEditedBeforeHydrationRef\.current = true\s*apiKeyEditedBeforeHydrationRef\.current = true\s*\}[\s\S]*?setRememberKey\(missingApiKeyRemember\)\s*setApiKey\(nextApiKey\)/,
+  "confirming the missing-key dialog before deferred hydration finishes should preserve the freshly entered API key"
+)

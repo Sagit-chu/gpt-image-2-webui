@@ -126,7 +126,7 @@ test("text-to-image route contract reaches generations and renders the result @c
     const upstreamCall = await waitForSingleUpstreamCall(upstream)
 
     expect(browserRequests[0]?.fields.prompt).toEqual(["Route contract text prompt"])
-    expect(browserRequests[0]?.fields.timeoutMs).toEqual(["90000"])
+    expect(browserRequests[0]?.fields.timeoutMs).toEqual(["180000"])
 
     expect(upstreamCall.method).toBe("POST")
     expect(upstreamCall.path).toBe("/v1/images/generations")

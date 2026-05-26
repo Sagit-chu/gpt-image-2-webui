@@ -22,6 +22,13 @@ type SettledCountTarget = {
   length: number
 }
 
+type OpenStudioOptions = {
+  apiKey?: string
+  endpoint?: string
+  remember?: boolean
+  waitForHydration?: boolean
+}
+
 export function attachBrowserErrorCapture(page: Page): BrowserErrors {
   const consoleErrors: string[] = []
   const pageErrors: string[] = []
@@ -131,9 +138,67 @@ export function parseMultipartRequest(request: Request): MultipartSnapshot {
   return parseMultipartBody(contentType, body)
 }
 
-export async function openStudio(page: Page, options?: { apiKey?: string; endpoint?: string }) {
-  const apiKey = options?.apiKey || API_KEY
-  const endpoint = options?.endpoint || DEFAULT_OPENAI_BASE_URL
+export async function deferZeroTimeouts(page: Page) {
+  await page.addInitScript(() => {
+    const originalSetTimeout = window.setTimeout.bind(window)
+    const originalClearTimeout = window.clearTimeout.bind(window)
+    let nextDeferredTimerId = 1
+    const deferredTimers = new Map<number, { args: unknown[]; callback: TimerHandler }>()
+
+    window.setTimeout = ((callback: TimerHandler, delay?: number, ...args: unknown[]) => {
+      if ((delay ?? 0) === 0) {
+        const deferredTimerId = nextDeferredTimerId
+        nextDeferredTimerId += 1
+        deferredTimers.set(deferredTimerId, { args, callback })
+        return deferredTimerId
+      }
+
+      return originalSetTimeout(callback, delay, ...args)
+    }) as typeof window.setTimeout
+
+    window.clearTimeout = ((timerId?: number) => {
+      if (typeof timerId === "number" && deferredTimers.delete(timerId)) {
+        return
+      }
+
+      originalClearTimeout(timerId)
+    }) as typeof window.clearTimeout
+
+    Object.assign(window, {
+      __imgxReleaseDeferredZeroTimeouts() {
+        const pendingTimers = [...deferredTimers.values()]
+        deferredTimers.clear()
+        window.setTimeout = originalSetTimeout
+        window.clearTimeout = originalClearTimeout
+
+        for (const { args, callback } of pendingTimers) {
+          originalSetTimeout(() => {
+            if (typeof callback === "function") {
+              callback(...args)
+              return
+            }
+
+            window.eval(callback)
+          }, 0)
+        }
+      },
+    })
+  })
+}
+
+export async function releaseDeferredZeroTimeouts(page: Page) {
+  await page.evaluate(() => {
+    ;(window as Window & typeof globalThis & {
+      __imgxReleaseDeferredZeroTimeouts?: () => void
+    }).__imgxReleaseDeferredZeroTimeouts?.()
+  })
+}
+
+export async function openStudio(page: Page, options?: OpenStudioOptions) {
+  const apiKey = options && "apiKey" in options ? options.apiKey ?? "" : API_KEY
+  const endpoint = options && "endpoint" in options ? options.endpoint ?? DEFAULT_OPENAI_BASE_URL : DEFAULT_OPENAI_BASE_URL
+  const remember = options?.remember ?? true
+  const waitForHydration = options?.waitForHydration ?? true
 
   await page.context().addCookies([
     {
@@ -143,22 +208,33 @@ export async function openStudio(page: Page, options?: { apiKey?: string; endpoi
     },
   ])
 
-  await page.addInitScript(({ apiKey, endpoint }) => {
+  await page.addInitScript(({ apiKey, endpoint, remember }) => {
     localStorage.setItem("imgx.locale", "en")
     localStorage.setItem(
       "imgx.connectionPreferences",
       JSON.stringify({
         version: 1,
-        remember: true,
+        remember,
         apiKey,
         endpoint,
       })
     )
-  }, { apiKey, endpoint })
+  }, { apiKey, endpoint, remember })
 
   await page.goto("/")
   await expect(page.locator("#prompt")).toBeVisible()
-  await expect(page.locator("#api-key")).toHaveValue(apiKey)
+
+  if (waitForHydration) {
+    if (!remember) {
+      await page.evaluate(() => new Promise<void>((resolve) => {
+        window.setTimeout(() => {
+          window.setTimeout(resolve, 0)
+        }, 0)
+      }))
+    }
+
+    await expect(page.locator("#api-key")).toHaveValue(apiKey)
+  }
 }
 
 export function selectedResultImage(page: Page): Locator {

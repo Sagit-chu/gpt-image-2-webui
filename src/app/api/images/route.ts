@@ -13,12 +13,12 @@ import {
 } from "@/lib/image-request"
 
 export const runtime = "nodejs"
-export const maxDuration = 120
+export const maxDuration = 185
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MIN_CUSTOM_DIMENSION = 64
 const MAX_CUSTOM_DIMENSION = 8192
-const DEFAULT_REQUEST_TIMEOUT_MS = 90_000
+const DEFAULT_REQUEST_TIMEOUT_MS = 180_000
 const MIN_REQUEST_TIMEOUT_MS = 20
 const MAX_REQUEST_TIMEOUT_MS = 600_000
 const GENERATE_SIZE_VALUES = new Set([

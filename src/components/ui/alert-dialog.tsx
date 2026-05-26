@@ -81,9 +81,10 @@ function AlertDialogDescription({
 
 function AlertDialogClose({
   className,
+  type = "button",
   ...props
 }: AlertDialogPrimitive.Close.Props) {
-  return <AlertDialogPrimitive.Close className={className} {...props} />
+  return <AlertDialogPrimitive.Close type={type} className={className} {...props} />
 }
 
 export {

@@ -1,15 +1,18 @@
 import { expect, test } from "@playwright/test"
 
 import {
+  DEFAULT_OPENAI_BASE_URL,
   PNG_BASE64,
   assertNoBrowserErrors,
   assertNoUnexpectedBrowserErrors,
   attachBrowserErrorCapture,
+  deferZeroTimeouts,
   expectSettledRequestCount,
   expectSummaryCard,
   generatedResultImages,
   openStudio,
   parseMultipartRequest,
+  releaseDeferredZeroTimeouts,
   selectedResultImage,
   type MultipartSnapshot,
 } from "./image-studio-test-helpers"
@@ -57,6 +60,139 @@ test("request-count stability waits for a quiet period after the last request", 
   } finally {
     clearTimeout(lateRequest)
   }
+})
+
+test("missing API key dialog opens before any proxy request", async ({ page }) => {
+  const intercepted: MultipartSnapshot[] = []
+
+  await openStudio(page, { apiKey: "", remember: false })
+
+  await page.route("**/api/images", async (route) => {
+    intercepted.push(parseMultipartRequest(route.request()))
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(createProxyPayload(GENERATIONS_ENDPOINT)),
+    })
+  })
+
+  await page.getByRole("button", { name: /^Generate images/ }).click()
+
+  await expect(page.getByRole("button", { name: "Confirm and continue" })).toBeVisible()
+  await expectSettledRequestCount(intercepted, 0, { label: "/api/images request" })
+})
+
+test("missing API key dialog cancel closes without submitting the outer form", async ({ page }) => {
+  const intercepted: MultipartSnapshot[] = []
+
+  await openStudio(page, { apiKey: "", remember: false })
+
+  await page.route("**/api/images", async (route) => {
+    intercepted.push(parseMultipartRequest(route.request()))
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(createProxyPayload(GENERATIONS_ENDPOINT)),
+    })
+  })
+
+  await page.locator("#prompt").fill("Cancel the missing key dialog")
+  await page.getByRole("button", { name: /^Generate images/ }).click()
+
+  const confirmButton = page.getByRole("button", { name: "Confirm and continue" })
+  await expect(confirmButton).toBeVisible()
+  await page.getByRole("button", { name: "Cancel" }).click()
+
+  await expect(confirmButton).not.toBeVisible()
+  await expectSettledRequestCount(intercepted, 0, { label: "/api/images request" })
+})
+
+test("remember dialog confirmation resumes generation with the typed connection values", async ({ page }) => {
+  const intercepted: MultipartSnapshot[] = []
+  const typedApiKey = "sk-unsaved-browser-test"
+  const typedEndpoint = "https://typed.example.test/v1"
+
+  await openStudio(page, {
+    apiKey: "",
+    endpoint: DEFAULT_OPENAI_BASE_URL,
+    remember: false,
+  })
+
+  await page.route("**/api/images", async (route) => {
+    intercepted.push(parseMultipartRequest(route.request()))
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(createProxyPayload(GENERATIONS_ENDPOINT)),
+    })
+  })
+
+  await page.locator("#endpoint").fill(typedEndpoint)
+  await page.locator("#api-key").fill(typedApiKey)
+  await page.getByRole("button", { name: /^Generate images/ }).click()
+
+  await expect(page.getByRole("button", { name: "Yes, remember" })).toBeVisible()
+  await page.getByRole("button", { name: "Yes, remember" }).click()
+
+  await expect.poll(() => intercepted.length).toBe(1)
+  expect(intercepted[0]?.fields.apiKey).toEqual([typedApiKey])
+  expect(intercepted[0]?.fields.endpoint).toEqual([typedEndpoint])
+  await expect(selectedResultImage(page)).toBeVisible()
+})
+
+test("deferred preference hydration does not overwrite freshly typed connection values", async ({ page }) => {
+  const rememberedApiKey = "sk-remembered-browser-test"
+  const rememberedEndpoint = "https://remembered.example.test/v1"
+  const typedApiKey = "sk-fresh-browser-test"
+  const typedEndpoint = "https://typed.example.test/v1"
+
+  await deferZeroTimeouts(page)
+  await openStudio(page, {
+    apiKey: rememberedApiKey,
+    endpoint: rememberedEndpoint,
+    remember: true,
+    waitForHydration: false,
+  })
+
+  await page.locator("#endpoint").fill(typedEndpoint)
+  await page.locator("#api-key").fill(typedApiKey)
+  await releaseDeferredZeroTimeouts(page)
+
+  let lastConnectionSnapshot = {
+    apiKey: typedApiKey,
+    endpoint: typedEndpoint,
+  }
+  let lastConnectionChangeAt = Date.now()
+
+  await expect.poll(async () => {
+    const currentSnapshot = await page.evaluate(() => {
+      return {
+        apiKey: (document.querySelector("#api-key") as HTMLInputElement | null)?.value || "",
+        endpoint: (document.querySelector("#endpoint") as HTMLInputElement | null)?.value || "",
+      }
+    })
+
+    if (
+      currentSnapshot.apiKey !== lastConnectionSnapshot.apiKey ||
+      currentSnapshot.endpoint !== lastConnectionSnapshot.endpoint
+    ) {
+      lastConnectionSnapshot = currentSnapshot
+      lastConnectionChangeAt = Date.now()
+    }
+
+    return (
+      currentSnapshot.apiKey === typedApiKey &&
+      currentSnapshot.endpoint === typedEndpoint &&
+      Date.now() - lastConnectionChangeAt >= 250
+    )
+  }, {
+    message: "freshly typed connection values should survive delayed preference hydration",
+    timeout: 1_200,
+    intervals: [50, 100, 200],
+  }).toBe(true)
+
+  await expect(page.locator("#api-key")).toHaveValue(typedApiKey)
+  await expect(page.locator("#endpoint")).toHaveValue(typedEndpoint)
 })
 
 test("text-to-image generation succeeds @cross-browser", async ({ page }) => {
