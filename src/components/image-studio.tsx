@@ -56,6 +56,7 @@ import {
   EmptyHeader,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import {
   Select,
@@ -2192,9 +2193,9 @@ export function ImageStudio({
                   >
                     {text.baseUrl}
                   </FieldLabel>
-                    <input
+                    <Input
                       id="endpoint"
-                      className="studio-control rounded-md font-mono text-xs focus-visible:border-primary focus-visible:ring-primary/20"
+                      className="studio-control h-11 rounded-md px-3 font-mono text-xs md:text-xs focus-visible:border-primary focus-visible:ring-primary/20"
                       value={endpoint}
                       readOnly={isBaseUrlLocked}
                       aria-readonly={isBaseUrlLocked}
@@ -2216,17 +2217,17 @@ export function ImageStudio({
                   >
                     {text.requestTimeout}
                   </FieldLabel>
-                    <input
+                    <Input
                       id="request-timeout"
                       min={MIN_REQUEST_TIMEOUT_SECONDS}
                       max={MAX_REQUEST_TIMEOUT_SECONDS}
-                    step="1"
-                    type="number"
-                    inputMode="numeric"
-                    className="studio-control rounded-md font-mono text-xs focus-visible:border-primary focus-visible:ring-primary/20"
-                    value={requestTimeoutSeconds}
-                    onChange={(event) => setRequestTimeoutSeconds(event.target.value)}
-                  />
+                      step="1"
+                      type="number"
+                      inputMode="numeric"
+                      className="studio-control h-11 rounded-md px-3 font-mono text-xs md:text-xs focus-visible:border-primary focus-visible:ring-primary/20"
+                      value={requestTimeoutSeconds}
+                      onChange={(event) => setRequestTimeoutSeconds(event.target.value)}
+                    />
                   <FieldDescription className="text-xs">
                     {t(locale, "requestTimeoutDescription", { seconds: normalizedRequestTimeoutSeconds })}
                   </FieldDescription>

@@ -6,7 +6,6 @@ import {
   extractGeneratedImages,
   getImageApiError,
   getPayloadField,
-  isContentPolicyViolation,
   materializeGeneratedImages,
   normalizeImageEndpoint,
   normalizeOpenAIBaseURL,
@@ -353,16 +352,6 @@ export async function POST(request: Request) {
     }
 
     if (error instanceof OpenAI.APIError) {
-      if (isContentPolicyViolation(error.error)) {
-        return NextResponse.json(
-          {
-            endpoint,
-            error: t(locale, "proxyContentPolicyViolation"),
-          },
-          { status: error.status || 400 }
-        )
-      }
-
       return NextResponse.json(
         {
           endpoint,

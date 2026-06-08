@@ -30,6 +30,7 @@ type UpstreamOutcome =
       ok: true
     }
   | {
+      errorCode?: string
       errorMessage: string
       ok: false
       status?: number
@@ -163,7 +164,10 @@ async function runInputImageScenario(options: {
     if (!outcome.ok) {
       return createJsonResponse(
         {
-          error: { message: outcome.errorMessage },
+          error: {
+            ...(outcome.errorCode ? { code: outcome.errorCode } : {}),
+            message: outcome.errorMessage,
+          },
         },
         outcome.status || 500
       )
@@ -278,6 +282,25 @@ async function main() {
   assert.equal(
     batchFailureFallback.result.firstError instanceof Error && batchFailureFallback.result.firstError.message,
     "upstream batch failed"
+  )
+
+  const securityPolicyFailure = await runInputImageScenario({
+    outcomes: [
+      {
+        errorCode: "content_policy_violation",
+        errorMessage: "Denied by Security Policy: A 10x credit penalty has been incurred for this request.",
+        ok: false,
+        status: 400,
+      },
+      { imageCount: 1, ok: true },
+      { imageCount: 1, ok: true },
+    ],
+    total: 2,
+  })
+
+  assert.equal(
+    securityPolicyFailure.result.firstError instanceof Error && securityPolicyFailure.result.firstError.message,
+    "Denied by Security Policy: A 10x credit penalty has been incurred for this request."
   )
 }
 

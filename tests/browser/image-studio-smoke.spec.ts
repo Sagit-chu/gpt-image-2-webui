@@ -195,6 +195,29 @@ test("deferred preference hydration does not overwrite freshly typed connection 
   await expect(page.locator("#endpoint")).toHaveValue(typedEndpoint)
 })
 
+test("connection inputs render the same boxed input styling as the API key field @cross-browser", async ({ page }) => {
+  await openStudio(page)
+
+  async function getInputBoxStyles(selector: string) {
+    return page.locator(selector).evaluate((element) => {
+      const styles = window.getComputedStyle(element)
+
+      return {
+        borderTopStyle: styles.borderTopStyle,
+        borderTopWidth: styles.borderTopWidth,
+        borderRadius: styles.borderRadius,
+        height: styles.height,
+        paddingLeft: styles.paddingLeft,
+      }
+    })
+  }
+
+  const apiKeyStyles = await getInputBoxStyles("#api-key")
+
+  await expect.poll(() => getInputBoxStyles("#endpoint")).toEqual(apiKeyStyles)
+  await expect.poll(() => getInputBoxStyles("#request-timeout")).toEqual(apiKeyStyles)
+})
+
 test("text-to-image generation succeeds @cross-browser", async ({ page }) => {
   const errors = attachBrowserErrorCapture(page)
   const intercepted: MultipartSnapshot[] = []
