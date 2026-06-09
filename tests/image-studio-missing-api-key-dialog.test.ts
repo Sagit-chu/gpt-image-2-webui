@@ -30,7 +30,7 @@ assert.match(
 
 assert.match(
   source,
-  /setIsMissingApiKeyDialogOpen\(false\)[\s\S]*?setPendingGenerationAfterApiKey\(false\)[\s\S]*?startGeneration\(/,
+  /setIsMissingApiKeyDialogOpen\(false\)[\s\S]*?setPendingGenerationAfterApiKey\(false\)[\s\S]*?enqueueGenerationTask\(/,
   "confirming the missing-key dialog should resume the blocked generation"
 )
 

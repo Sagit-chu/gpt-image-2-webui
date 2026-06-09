@@ -6,18 +6,24 @@ const source = readFileSync(join(process.cwd(), "src/components/image-studio.tsx
 
 assert.match(
   source,
-  /const \[elapsedGenerationSeconds, setElapsedGenerationSeconds\] = useState\(0\)/,
-  "generation status needs elapsed seconds state so timer ticks re-render the UI"
+  /const \[elapsedNow, setElapsedNow\] = useState\(\(\) => Date\.now\(\)\)/,
+  "generation status needs tick state so selected-task timer updates re-render the UI"
 )
 
 assert.match(
   source,
-  /window\.setInterval\(\s*updateElapsedGenerationSeconds,\s*1000\s*\)/,
-  "generation status should refresh elapsed seconds every second while a request is running"
+  /window\.setInterval\(\(\) => setElapsedNow\(Date\.now\(\)\),\s*1000\s*\)/,
+  "generation status should refresh selected-task elapsed time every second while a task is running"
 )
 
 assert.match(
   source,
-  /\{elapsedGenerationSeconds\}s/,
-  "generation status should render elapsedGenerationSeconds instead of calculating Date.now() during render"
+  /const selectedTaskElapsedSeconds = selectedTaskStartedAt[\s\S]*elapsedNow - selectedTaskStartedAt[\s\S]*\{selectedTaskElapsedSeconds\}s/,
+  "generation status should render selectedTaskElapsedSeconds derived from tick state instead of calculating Date.now() during render"
+)
+
+assert.doesNotMatch(
+  source,
+  /elapsedGenerationSeconds/,
+  "elapsed timer rendering should not depend on singleton generation timer state"
 )

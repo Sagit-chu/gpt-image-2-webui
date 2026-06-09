@@ -14,6 +14,7 @@ import {
   parseMultipartRequest,
   releaseDeferredZeroTimeouts,
   selectedResultImage,
+  taskRowByPrompt,
   type MultipartSnapshot,
 } from "./image-studio-test-helpers"
 
@@ -295,6 +296,108 @@ test("input-image generation succeeds @cross-browser", async ({ page }) => {
   assertNoBrowserErrors(errors)
 })
 
+test("multi-task submissions use configured concurrency and immutable snapshots @cross-browser", async ({ page }) => {
+  const intercepted: MultipartSnapshot[] = []
+  const releases = [createDeferred<void>(), createDeferred<void>()]
+
+  await openStudio(page)
+  await page.locator("#max-concurrent-tasks").click()
+  await page.getByRole("option", { name: "2" }).click()
+
+  await page.route("**/api/images", async (route) => {
+    const snapshot = parseMultipartRequest(route.request())
+    intercepted.push(snapshot)
+    await releases[Math.min(intercepted.length - 1, 1)].promise
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(createProxyPayload(GENERATIONS_ENDPOINT)),
+    })
+  })
+
+  await page.locator("#prompt").fill("First concurrent prompt")
+  await page.locator("#api-key").fill("sk-first-task")
+  await page.locator("#endpoint").fill("https://first.example.test/v1")
+  await page.getByRole("button", { name: /^Generate images/ }).click()
+
+  await page.locator("#prompt").fill("Second concurrent prompt")
+  await page.locator("#api-key").fill("sk-second-task")
+  await page.locator("#endpoint").fill("https://second.example.test/v1")
+  await page.getByRole("button", { name: /^Generate images/ }).click()
+
+  await expect.poll(() => intercepted.length).toBe(2)
+  expect(intercepted[0]?.fields.prompt).toEqual(["First concurrent prompt"])
+  expect(intercepted[0]?.fields.apiKey).toEqual(["sk-first-task"])
+  expect(intercepted[0]?.fields.endpoint).toEqual(["https://first.example.test/v1"])
+  expect(intercepted[1]?.fields.prompt).toEqual(["Second concurrent prompt"])
+  expect(intercepted[1]?.fields.apiKey).toEqual(["sk-second-task"])
+  expect(intercepted[1]?.fields.endpoint).toEqual(["https://second.example.test/v1"])
+  await expect(page.getByText("sk-first-task")).toHaveCount(0)
+  await expect(page.getByText("sk-second-task")).toHaveCount(0)
+
+  releases[0].resolve()
+  releases[1].resolve()
+  await expect(selectedResultImage(page)).toBeVisible()
+})
+
+test("queued task can be removed without sending a request @cross-browser", async ({ page }) => {
+  const intercepted: MultipartSnapshot[] = []
+  const releaseFirst = createDeferred<void>()
+
+  await openStudio(page)
+  await page.route("**/api/images", async (route) => {
+    intercepted.push(parseMultipartRequest(route.request()))
+    await releaseFirst.promise
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(createProxyPayload(GENERATIONS_ENDPOINT)) })
+  })
+
+  await page.locator("#prompt").fill("Long running first task")
+  await page.getByRole("button", { name: /^Generate images/ }).click()
+  await expect.poll(() => intercepted.length).toBe(1)
+
+  await page.locator("#prompt").fill("Queued task to remove")
+  await page.getByRole("button", { name: /^Generate images/ }).click()
+  await expect(taskRowByPrompt(page, "Queued task to remove")).toBeVisible()
+  await taskRowByPrompt(page, "Queued task to remove").getByRole("button", { name: "Remove: Queued task to remove" }).click()
+  await expect(taskRowByPrompt(page, "Queued task to remove")).toHaveCount(0)
+  await expectSettledRequestCount(intercepted, 1, { label: "/api/images request" })
+
+  releaseFirst.resolve()
+})
+
+test("stopping one running task does not stop another running task @cross-browser", async ({ page }) => {
+  const intercepted: MultipartSnapshot[] = []
+  const releases = [createDeferred<void>(), createDeferred<void>()]
+
+  await openStudio(page)
+  await page.locator("#max-concurrent-tasks").click()
+  await page.getByRole("option", { name: "2" }).click()
+
+  await page.route("**/api/images", async (route) => {
+    const index = intercepted.length
+    intercepted.push(parseMultipartRequest(route.request()))
+    await releases[Math.min(index, 1)].promise
+    try {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(createProxyPayload(GENERATIONS_ENDPOINT)) })
+    } catch {
+      return
+    }
+  })
+
+  await page.locator("#prompt").fill("Stop only this task")
+  await page.getByRole("button", { name: /^Generate images/ }).click()
+  await page.locator("#prompt").fill("Keep this task running")
+  await page.getByRole("button", { name: /^Generate images/ }).click()
+  await expect.poll(() => intercepted.length).toBe(2)
+
+  await taskRowByPrompt(page, "Stop only this task").getByRole("button", { name: "Stop: Stop only this task" }).click()
+  await expect(taskRowByPrompt(page, "Stop only this task")).toContainText(/stopped/i)
+  releases[1].resolve()
+  await expect(taskRowByPrompt(page, "Keep this task running")).toContainText(/completed/i)
+  await expectSettledRequestCount(intercepted, 2, { label: "/api/images request" })
+  releases[0].resolve()
+})
+
 test("complete failure shows feedback and no result image @cross-browser", async ({ page }) => {
   const errors = attachBrowserErrorCapture(page)
   const intercepted: MultipartSnapshot[] = []
@@ -314,7 +417,7 @@ test("complete failure shows feedback and no result image @cross-browser", async
   await page.getByRole("button", { name: /^Generate images/ }).click()
 
   await expect.poll(() => intercepted.length).toBe(1)
-  await expect(page.getByText("mocked total failure")).toBeVisible()
+  await expect(page.getByText(/This task failed: mocked total failure/)).toBeVisible()
   await expect(generatedResultImages(page)).toHaveCount(0)
   await expectSettledRequestCount(intercepted, 1, { label: "/api/images request" })
 
@@ -355,7 +458,7 @@ test("partial success keeps earlier images visible and shows a warning", async (
   await page.getByRole("button", { name: /^Generate images/ }).click()
 
   await expect(selectedResultImage(page)).toBeVisible()
-  await expect(page.getByText(/Generated 1\/2\. Some calls failed:/)).toBeVisible()
+  await expect(page.getByText(/Generated 1\/2\. Partial result kept:/)).toBeVisible()
   await expectSummaryCard(page, "count", "1 / 2")
   await expect.poll(() => intercepted.length).toBe(4)
   await expectSettledRequestCount(intercepted, 4, { label: "/api/images request" })
@@ -391,8 +494,8 @@ test("stop while pending shows stopped feedback and prevents extra requests", as
   await page.getByRole("button", { name: /^Generate images/ }).click()
   await expect.poll(() => intercepted.length).toBe(1)
 
-  await page.getByRole("button", { name: "Stop" }).click()
-  await expect(page.getByText("Generation stopped.")).toBeVisible()
+  await page.getByRole("button", { name: "Stop: Stop this pending generation" }).click()
+  await expect(page.getByText(/This task was stopped/)).toBeVisible()
   await expectSettledRequestCount(intercepted, 1, { label: "/api/images request" })
 
   releasePendingResponse.resolve()
@@ -428,7 +531,7 @@ test("timeout while pending shows timed-out feedback and no result image", async
   await page.getByRole("button", { name: /^Generate images/ }).click()
   await expect.poll(() => intercepted.length).toBe(1)
 
-  await expect(page.getByText("Generation timed out after 5s.")).toBeVisible({ timeout: 7_000 })
+  await expect(page.getByText(/This task timed out/)).toBeVisible({ timeout: 7_000 })
   await expectSettledRequestCount(intercepted, 1, { label: "/api/images request" })
 
   releasePendingResponse.resolve()

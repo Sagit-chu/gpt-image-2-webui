@@ -2,12 +2,15 @@ import assert from "node:assert/strict"
 
 async function main() {
   const originalFetch = globalThis.fetch
+  const rawEndpoint = "https://user:pass@example.test/v1"
+  const rawGenerationEndpoint = "https://user:pass@example.test/v1/images/generations"
+  const safeGenerationEndpoint = "https://example.test/v1/images/generations"
   let upstreamCalls = 0
 
   globalThis.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
 
-    if (url === "https://api.openai.com/v1/images/generations") {
+    if (url === rawGenerationEndpoint) {
       upstreamCalls += 1
       assert.equal(init?.method, "POST")
 
@@ -31,7 +34,7 @@ async function main() {
     const formData = new FormData()
 
     formData.append("apiKey", "test-key")
-    formData.append("endpoint", "https://api.openai.com/v1")
+    formData.append("endpoint", rawEndpoint)
     formData.append("prompt", "test prompt")
     formData.append("quality", "high")
     formData.append("size", "1536x1024")
@@ -46,6 +49,9 @@ async function main() {
 
     assert.equal(response.status, 200)
     assert.equal(upstreamCalls, 1)
+    assert.equal(payload.endpoint, safeGenerationEndpoint)
+    assert.equal(payload.debug.request.endpoint, safeGenerationEndpoint)
+    assert.equal(payload.debug.response.endpoint, safeGenerationEndpoint)
     assert.equal(payload.quality, "high")
     assert.equal(payload.qualityReported, false)
     assert.equal(payload.size, "1536x1024")

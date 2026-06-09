@@ -245,6 +245,14 @@ export function generatedResultImages(page: Page): Locator {
   return page.locator('main button[aria-label^="Select image "] img')
 }
 
+export function taskRows(page: Page): Locator {
+  return page.locator("main [data-task-status]")
+}
+
+export function taskRowByPrompt(page: Page, prompt: string): Locator {
+  return taskRows(page).filter({ hasText: prompt }).first()
+}
+
 export async function expectSummaryCard(page: Page, label: string, value: string) {
   const labelText = page.locator("main").getByText(label, { exact: true }).last()
   const valueText = labelText.locator("xpath=following-sibling::span[1]")

@@ -3,6 +3,11 @@ import { NextResponse } from "next/server"
 
 import { resolveLocale, t } from "@/lib/i18n"
 import {
+  getConfiguredTrustedImageBaseURLs,
+  isTrustedServerImageBaseURL,
+  sanitizeEndpointForDisplay,
+} from "@/lib/image-endpoint-trust"
+import {
   extractGeneratedImages,
   getImageApiError,
   getPayloadField,
@@ -180,7 +185,10 @@ export async function POST(request: Request) {
           : request.headers.get("accept-language") || ""
       })()
     )
-    const apiKey = getText(incomingFormData, "apiKey", process.env.OPENAI_API_KEY || "")
+    const userApiKey = getText(incomingFormData, "apiKey")
+    const serverApiKey = process.env.OPENAI_API_KEY || ""
+    const apiKey = userApiKey || serverApiKey
+    const usesServerApiKey = !userApiKey && Boolean(serverApiKey)
     const prompt = getText(incomingFormData, "prompt")
 
     if (!apiKey) {
@@ -212,8 +220,14 @@ export async function POST(request: Request) {
     }
 
     const model = getText(incomingFormData, "model", "gpt-image-2")
-    endpoint = normalizeImageEndpoint(getText(incomingFormData, "endpoint"), images.length > 0, locale)
     const baseURL = normalizeOpenAIBaseURL(getText(incomingFormData, "endpoint"), locale)
+
+    if (usesServerApiKey && !isTrustedServerImageBaseURL(baseURL, getConfiguredTrustedImageBaseURLs(process.env.OPENAI_TRUSTED_IMAGE_BASE_URLS || "", locale), locale)) {
+      return NextResponse.json({ error: t(locale, "proxyServerKeyCustomEndpointBlocked") }, { status: 400 })
+    }
+
+    endpoint = normalizeImageEndpoint(getText(incomingFormData, "endpoint"), images.length > 0, locale)
+    const displayEndpoint = sanitizeEndpointForDisplay(endpoint)
     const outputFormat = getOutputFormat(incomingFormData)
     const imageCount = Number(getText(incomingFormData, "imageCount", "1"))
     requestTimeoutMs = getRequestTimeoutMs(incomingFormData)
@@ -281,7 +295,7 @@ export async function POST(request: Request) {
     if (!generatedImages.length) {
       return NextResponse.json(
         {
-          endpoint,
+          endpoint: displayEndpoint,
           error: t(locale, "proxyNoImageField"),
         },
         { status: 502 }
@@ -291,11 +305,11 @@ export async function POST(request: Request) {
     return NextResponse.json({
       background: getPayloadField(payload, "background"),
       created: getPayloadField(payload, "created"),
-      endpoint,
+      endpoint: displayEndpoint,
       debug: {
         request: {
           background,
-          endpoint,
+          endpoint: displayEndpoint,
           imageCount: n,
           inputFidelity: requestInputFidelity,
           inputImageCount: images.length,
@@ -310,7 +324,7 @@ export async function POST(request: Request) {
         response: {
           background: getPayloadField(payload, "background"),
           created: getPayloadField(payload, "created"),
-          endpoint,
+          endpoint: displayEndpoint,
           imageCount: generatedImages.length,
           outputFormat: getPayloadField(payload, "output_format") || getPayloadField(payload, "outputFormat") || outputFormat,
           payloadKeys: getPayloadKeys(payload),
@@ -334,7 +348,7 @@ export async function POST(request: Request) {
     if (error instanceof OpenAI.APIConnectionTimeoutError) {
       return NextResponse.json(
         {
-          endpoint,
+          endpoint: sanitizeEndpointForDisplay(endpoint),
           error: t(locale, "proxyRequestTimeout", { seconds: Math.ceil(requestTimeoutMs / 1000) }),
         },
         { status: 504 }
@@ -344,7 +358,7 @@ export async function POST(request: Request) {
     if (error instanceof OpenAI.APIUserAbortError) {
       return NextResponse.json(
         {
-          endpoint,
+          endpoint: sanitizeEndpointForDisplay(endpoint),
           error: t(locale, "proxyGenerationFailed"),
         },
         { status: 499 }
@@ -354,7 +368,7 @@ export async function POST(request: Request) {
     if (error instanceof OpenAI.APIError) {
       return NextResponse.json(
         {
-          endpoint,
+          endpoint: sanitizeEndpointForDisplay(endpoint),
           error: getImageApiError(error.error) || error.message || t(locale, "proxyRequestFailed", { status: error.status || 500 }),
         },
         { status: error.status || 500 }
@@ -363,7 +377,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        endpoint,
+        endpoint: sanitizeEndpointForDisplay(endpoint),
         error: error instanceof Error ? error.message : t(locale, "proxyGenerationFailed"),
       },
       { status: 500 }

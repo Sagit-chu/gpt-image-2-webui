@@ -1,7 +1,7 @@
 "use client"
 
 import type { CSSProperties, DragEvent, FocusEvent } from "react"
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { FormEvent, useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import {
   ArrowDownToLineIcon,
   CheckCircle2Icon,
@@ -75,8 +75,21 @@ import {
   IMAGE_STUDIO_HISTORY_LIMIT,
   appendImageStudioHistory,
 } from "@/lib/image-studio-generation"
+import { sanitizeEndpointForDisplay } from "@/lib/image-endpoint-trust"
 import { type GeneratedImage } from "@/lib/image-request"
-import { runImageStudioSession } from "@/lib/image-studio-session"
+import { runImageStudioSession, type ImageStudioSessionResult } from "@/lib/image-studio-session"
+import {
+  clampMaxConcurrentTasks,
+  createHistoryResultFromTask,
+  createImageTaskSnapshot,
+  createQueuedImageTask,
+  getNextRunnableTaskIds,
+  sanitizeImageTaskSnapshot,
+  updateTaskImages,
+  type ImageTask,
+  type ImageTaskHistoryResult,
+  type ImageTaskStatus,
+} from "@/lib/image-studio-tasks"
 import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE_KEY,
@@ -713,22 +726,7 @@ function normalizeRequestTimeoutSeconds(value: string) {
   )
 }
 
-type StudioResponse = {
-  endpoint: string
-  id: string
-  generation: number
-  debug?: StudioDebug | null
-  images: GeneratedImage[]
-  model: string
-  outputFormat: string
-  prompt: string
-  quality: string
-  qualityReported: boolean
-  requestedCount: number
-  size: string
-  sizeReported: boolean
-  sourceLabel?: string
-}
+type StudioResponse = ImageTaskHistoryResult<StudioDebug>
 
 type StudioDebug = {
   request: {
@@ -776,7 +774,7 @@ type ActiveSource = {
 type StoredConnectionPreferences = {
   version: 1
   remember: boolean
-  apiKey: string
+  "apiKey": string
   endpoint: string
 }
 
@@ -1097,7 +1095,7 @@ function readStoredConnectionPreferences(): StoredConnectionPreferences {
         return {
           version: 1,
           remember: parsed.remember,
-          apiKey: parsed.apiKey,
+          "apiKey": parsed.apiKey,
           endpoint: parsed.endpoint.trim() || DEFAULT_ENDPOINT,
         }
       }
@@ -1111,7 +1109,7 @@ function readStoredConnectionPreferences(): StoredConnectionPreferences {
   return {
     version: 1,
     remember,
-    apiKey: remember ? localStorage.getItem(LEGACY_API_KEY_KEY) || "" : "",
+    "apiKey": remember ? localStorage.getItem(LEGACY_API_KEY_KEY) || "" : "",
     endpoint: remember ? localStorage.getItem(LEGACY_ENDPOINT_KEY)?.trim() || DEFAULT_ENDPOINT : DEFAULT_ENDPOINT,
   }
 }
@@ -1130,7 +1128,7 @@ function writeStoredConnectionPreferences({
   const preferences: StoredConnectionPreferences = {
     version: 1,
     remember: true,
-    apiKey,
+    "apiKey": apiKey,
     endpoint: endpoint.trim() || DEFAULT_ENDPOINT,
   }
 
@@ -1150,9 +1148,14 @@ export function ImageStudio({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const activeSourceRef = useRef<ActiveSource | null>(null)
   const uploadsRef = useRef<UploadPreview[]>([])
-  const generationAbortControllerRef = useRef<AbortController | null>(null)
-  const generationTimeoutRef = useRef<number | null>(null)
-  const progressResetTimeoutRef = useRef<number | null>(null)
+  const taskAbortControllersRef = useRef(new Map<string, AbortController>())
+  const taskTimeoutsRef = useRef(new Map<string, number>())
+  const taskStartedAtRef = useRef(new Map<string, number>())
+  const runningTaskIdsRef = useRef(new Set<string>())
+  const tasksRef = useRef<ImageTask<StudioDebug>[]>([])
+  const schedulerTimeoutRef = useRef<number | null>(null)
+  const scheduleRunnableQueuedTasksRef = useRef<() => void>(() => {})
+  const isMountedRef = useRef(true)
   const referenceDropDepthRef = useRef(0)
   const apiKeyEditedBeforeHydrationRef = useRef(false)
   const endpointEditedBeforeHydrationRef = useRef(false)
@@ -1186,13 +1189,11 @@ export function ImageStudio({
   const [outputFormat, setOutputFormat] = useState("png")
   const [background, setBackground] = useState("auto")
   const [imageCount, setImageCount] = useState(1)
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [generationStartedAt, setGenerationStartedAt] = useState<number | null>(null)
-  const [elapsedGenerationSeconds, setElapsedGenerationSeconds] = useState(0)
-  const [result, setResult] = useState<StudioResponse | null>(null)
+  const [tasks, setTasks] = useState<ImageTask<StudioDebug>[]>([])
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [maxConcurrentTasks, setMaxConcurrentTasks] = useState(1)
+  const [elapsedNow, setElapsedNow] = useState(() => Date.now())
   const [history, setHistory] = useState<StudioResponse[]>([])
-  const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
   const locale = localeOverride ?? browserLocale
   const text = studioMessages[locale]
@@ -1231,12 +1232,26 @@ export function ImageStudio({
       ? `${customSizeValue} · ${text.aspectCustom}`
       : text.customAspectDescription
     : selectedSizeOption.label
-  const selectedImage = result?.images[selectedImageIndex] || result?.images[0] || null
-  const selectedImageNumber = selectedImage ? Math.min(selectedImageIndex, (result?.images.length || 1) - 1) + 1 : 0
   const inputUploads = activeSource ? [activeSource.upload, ...uploads] : uploads
   const inputUploadCount = inputUploads.length
   const maxReferenceUploads = getReferenceUploadLimit(activeSource)
-  const nextGeneration = activeSource ? activeSource.round + 1 : 1
+  const selectedTask = tasks.find((task) => task.snapshot.id === selectedTaskId) || tasks.at(-1) || null
+  const selectedTaskImage = selectedTask?.images[selectedTask.selectedImageIndex] || selectedTask?.images[0] || null
+  const selectedTaskImageNumber = selectedTask && selectedTaskImage ? Math.min(selectedTask.selectedImageIndex, Math.max(selectedTask.images.length - 1, 0)) + 1 : 0
+  const selectedTaskHasImages = Boolean(selectedTask?.images.length)
+  const selectedQueuePosition = selectedTask?.status === "queued"
+    ? tasks.filter((task) => task.status === "queued").findIndex((task) => task.snapshot.id === selectedTask.snapshot.id) + 1
+    : 0
+  const selectedPendingCount = selectedTask
+    ? Math.max(selectedTask.snapshot.imageCount - selectedTask.images.length, 0)
+    : 0
+  const isAnyTaskRunning = tasks.some((task) => task.status === "running")
+  const isSelectedTaskRunning = selectedTask?.status === "running"
+  const selectedTaskProgress = selectedTask?.progress || 0
+  const selectedTaskStartedAt = selectedTask?.startedAt || null
+  const selectedTaskElapsedSeconds = selectedTaskStartedAt
+    ? Math.max(0, Math.floor((elapsedNow - selectedTaskStartedAt) / 1000))
+    : 0
 
   useEffect(() => {
     document.documentElement.lang = getDocumentLang(locale)
@@ -1288,19 +1303,16 @@ export function ImageStudio({
   }, [activeSource])
 
   useEffect(() => {
-    if (!isGenerating || generationStartedAt === null) {
-      return
-    }
+    tasksRef.current = tasks
+  }, [tasks])
 
-    const updateElapsedGenerationSeconds = () => {
-      setElapsedGenerationSeconds(Math.max(0, Math.floor((Date.now() - generationStartedAt) / 1000)))
-    }
+  useEffect(() => {
+    if (!isAnyTaskRunning) return
 
-    updateElapsedGenerationSeconds()
-    const intervalId = window.setInterval(updateElapsedGenerationSeconds, 1000)
+    const intervalId = window.setInterval(() => setElapsedNow(Date.now()), 1000)
 
     return () => window.clearInterval(intervalId)
-  }, [generationStartedAt, isGenerating])
+  }, [isAnyTaskRunning])
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1314,7 +1326,16 @@ export function ImageStudio({
   }, [])
 
   useEffect(() => {
+    isMountedRef.current = true
+
+    const taskTimeouts = taskTimeoutsRef.current
+    const taskAbortControllers = taskAbortControllersRef.current
+    const taskStartedAt = taskStartedAtRef.current
+    const runningTaskIds = runningTaskIdsRef.current
+
     return () => {
+      isMountedRef.current = false
+
       for (const upload of uploadsRef.current) {
         URL.revokeObjectURL(upload.url)
       }
@@ -1323,17 +1344,22 @@ export function ImageStudio({
         URL.revokeObjectURL(activeSourceRef.current.upload.url)
       }
 
-      if (progressResetTimeoutRef.current) {
-        window.clearTimeout(progressResetTimeoutRef.current)
+      if (schedulerTimeoutRef.current) {
+        window.clearTimeout(schedulerTimeoutRef.current)
+        schedulerTimeoutRef.current = null
       }
 
-      if (generationTimeoutRef.current) {
-        window.clearTimeout(generationTimeoutRef.current)
+      for (const timeoutId of taskTimeouts.values()) {
+        window.clearTimeout(timeoutId)
       }
+      taskTimeouts.clear()
+      taskStartedAt.clear()
 
-      generationAbortControllerRef.current?.abort(
-        createGenerationControlError("GenerationAbortError", "component-unmounted")
-      )
+      for (const controller of taskAbortControllers.values()) {
+        controller.abort(createGenerationControlError("GenerationAbortError", "component-unmounted"))
+      }
+      taskAbortControllers.clear()
+      runningTaskIds.clear()
     }
   }, [])
 
@@ -1456,64 +1482,61 @@ export function ImageStudio({
   }
 
   async function setGeneratedImageAsSource(index: number, recipeId?: RemixRecipeId) {
-    const image = result?.images[index]
+    const image = selectedTask?.images[index]
 
-    if (!image) {
+    if (!image || !selectedTask) {
       toast.error(workflow.stageFailed)
       return
     }
 
-    try {
-      const upload = await createGeneratedUploadPreview({
-        image,
-        index,
-        locale,
-        outputFormat: result?.outputFormat || outputFormat,
-      })
-      const nextSource: ActiveSource = {
-        label: `${workflow.sourceReady} · ${String(index + 1).padStart(2, "0")}`,
-        promptSnapshot: image.revisedPrompt || result?.prompt || prompt.trim(),
-        round: result?.generation || 1,
-        upload,
-      }
+    const upload = await createGeneratedUploadPreview({
+      image,
+      index,
+      locale,
+      outputFormat: selectedTask.snapshot.outputFormat,
+    })
 
-      setActiveSource((current) => {
-        if (current) {
-          URL.revokeObjectURL(current.upload.url)
-        }
-
-        return nextSource
-      })
-      setUploads((current) => {
-        const nextLimit = getReferenceUploadLimit(nextSource)
-        const { overflow, visible } = splitUploadsByLimit(current, nextLimit)
-
-        for (const extraUpload of overflow) {
-          URL.revokeObjectURL(extraUpload.url)
-        }
-
-        if (overflow.length) {
-          toast.warning(t(locale, "maxUploadsWarning", { count: nextLimit }))
-        }
-
-        return visible
-      })
-      setSelectedImageIndex(index)
-
-      if (recipeId) {
-        const recipe = workflow.recipes[recipeId]
-        const recipeItem = remixRecipeItems.find((item) => item.id === recipeId)
-
-        updatePrompt((current) => appendRemixInstruction(current, recipe.instruction))
-        setImageCount(recipeItem?.count || 1)
-        toast.success(workflow.recipeSuccess)
-        return
-      }
-
-      toast.success(workflow.referenceSuccess)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : workflow.stageFailed)
+    const nextSource: ActiveSource = {
+      label: `${workflow.sourceReady} · ${String(index + 1).padStart(2, "0")}`,
+      promptSnapshot: image.revisedPrompt || selectedTask.snapshot.prompt,
+      round: selectedTask?.snapshot.generation || 1,
+      upload,
     }
+
+    setActiveSource((current) => {
+      if (current) {
+        URL.revokeObjectURL(current.upload.url)
+      }
+
+      return nextSource
+    })
+    setUploads((current) => {
+      const nextLimit = getReferenceUploadLimit(nextSource)
+      const { overflow, visible } = splitUploadsByLimit(current, nextLimit)
+
+      for (const extraUpload of overflow) {
+        URL.revokeObjectURL(extraUpload.url)
+      }
+
+      if (overflow.length) {
+        toast.warning(t(locale, "maxUploadsWarning", { count: nextLimit }))
+      }
+
+      return visible
+    })
+    updateTaskSelectedImageIndex(selectedTask.snapshot.id, index)
+
+    if (recipeId) {
+      const recipe = workflow.recipes[recipeId]
+      const recipeItem = remixRecipeItems.find((item) => item.id === recipeId)
+
+      updatePrompt((current) => appendRemixInstruction(current, recipe.instruction))
+      setImageCount(recipeItem?.count || 1)
+      toast.success(workflow.recipeSuccess)
+      return
+    }
+
+    toast.success(workflow.referenceSuccess)
   }
 
   async function copyPromptToClipboard(value: string) {
@@ -1560,7 +1583,7 @@ export function ImageStudio({
     }
 
     setPendingGenerationAfterRemember(false)
-    void startGeneration(undefined, { skipRememberPrompt: true })
+    void enqueueGenerationTask(undefined, { skipRememberPrompt: true })
   }
 
   function handleMissingApiKeyDialogOpenChange(open: boolean) {
@@ -1595,24 +1618,392 @@ export function ImageStudio({
     setRememberKey(missingApiKeyRemember)
     setApiKey(nextApiKey)
     setMissingApiKeyValue("")
-    void startGeneration(nextApiKey, { skipRememberPrompt: true })
+    void enqueueGenerationTask(nextApiKey, { skipRememberPrompt: true })
   }
 
-  const stopGeneration = useCallback(() => {
-    generationAbortControllerRef.current?.abort(
+  function updateTaskSelectedImageIndex(taskId: string, imageIndex: number) {
+    setTasks((current) => current.map((task) => {
+      if (task.snapshot.id !== taskId) return task
+      const boundedIndex = Math.min(Math.max(imageIndex, 0), Math.max(task.images.length - 1, 0))
+      return { ...task, selectedImageIndex: boundedIndex }
+    }))
+  }
+
+  function stopTask(taskId: string) {
+    taskAbortControllersRef.current.get(taskId)?.abort(
       createGenerationControlError("GenerationAbortError", text.generationStopped)
     )
-  }, [text.generationStopped])
+  }
 
-  async function startGeneration(
+  function removeQueuedTask(taskId: string) {
+    const previousTasks = tasksRef.current
+    const nextTasks = previousTasks.filter((task) => task.snapshot.id !== taskId || task.status !== "queued")
+
+    if (nextTasks.length === previousTasks.length) {
+      return
+    }
+
+    taskStartedAtRef.current.delete(taskId)
+    tasksRef.current = nextTasks
+    setTasks(nextTasks)
+    setSelectedTaskId((current) => current === taskId
+      ? nextTasks.find((task) => task.snapshot.id !== taskId)?.snapshot.id || null
+      : current
+    )
+    scheduleRunnableQueuedTasksRef.current()
+  }
+
+  function updateTask(taskId: string, updater: (task: ImageTask<StudioDebug>) => ImageTask<StudioDebug>) {
+    if (!isMountedRef.current) return null
+
+    let updatedTask: ImageTask<StudioDebug> | null = null
+    const nextTasks = tasksRef.current.map((task) => {
+      if (task.snapshot.id !== taskId) return task
+
+      const nextTask = updater(task)
+      updatedTask = nextTask
+      return nextTask
+    })
+
+    tasksRef.current = nextTasks
+    setTasks(nextTasks)
+
+    return updatedTask
+  }
+
+  function updateTerminalTaskHistory(terminalTask: ImageTask<StudioDebug>) {
+    if (!isMountedRef.current) return
+    if (terminalTask.status !== "completed" && terminalTask.status !== "partial") return
+
+    const historyResult = createHistoryResultFromTask<StudioDebug>(terminalTask)
+
+    if (historyResult) {
+      setHistory((current) => appendImageStudioHistory(current, historyResult, IMAGE_STUDIO_HISTORY_LIMIT))
+    }
+  }
+
+  function completeTaskFromSessionResult(
+    taskId: string,
+    sessionResult: ImageStudioSessionResult<StudioDebug>
+  ) {
+    const task = tasksRef.current.find((item) => item.snapshot.id === taskId)
+    if (!task) return
+
+    const taskLocale = task.snapshot.locale
+    const taskText = studioMessages[taskLocale]
+
+    if (!sessionResult.images.length) {
+      updateTask(taskId, (item) => {
+        const sanitizedSnapshot = sanitizeImageTaskSnapshot(item.snapshot)
+
+        return {
+          ...item,
+          completedAt: Date.now(),
+          errorMessage: getGenerationErrorMessage(sessionResult.firstError, taskText.allRequestsFailed),
+          progress: 0,
+          snapshot: {
+            ...item.snapshot,
+            ...sanitizedSnapshot,
+            apiKey: sanitizedSnapshot.apiKey,
+            references: [],
+          },
+          status: "failed",
+        }
+      })
+      toast.error(getGenerationErrorMessage(sessionResult.firstError, taskText.allRequestsFailed))
+      return
+    }
+
+    const visibleImages = sessionResult.images.slice(0, task.snapshot.imageCount)
+    const terminalTask = updateTask(taskId, (item) => {
+      const sanitizedSnapshot = sanitizeImageTaskSnapshot(item.snapshot)
+
+      const terminalTask: ImageTask<StudioDebug> = {
+        ...updateTaskImages(item, visibleImages),
+        completedAt: Date.now(),
+        debug: sessionResult.debug || item.debug,
+        endpoint: sessionResult.endpoint,
+        partialErrorMessage: sessionResult.isPartial
+          ? getGenerationErrorMessage(sessionResult.firstError, taskText.generationFailed)
+          : null,
+        progress: 100,
+        quality: sessionResult.quality,
+        qualityReported: sessionResult.qualityReported,
+        size: sessionResult.size,
+        sizeReported: sessionResult.sizeReported,
+        snapshot: {
+          ...item.snapshot,
+          ...sanitizedSnapshot,
+          apiKey: sanitizedSnapshot.apiKey,
+          references: [],
+        },
+        status: sessionResult.isPartial ? "partial" : "completed",
+      }
+
+      return terminalTask
+    })
+
+    if (terminalTask) {
+      updateTerminalTaskHistory(terminalTask)
+    }
+
+    if (sessionResult.isPartial) {
+      toast.warning(
+        t(taskLocale, "generatedPartialWarning", {
+          count: visibleImages.length,
+          total: task.snapshot.imageCount,
+          error: sessionResult.firstError
+            ? getGenerationErrorMessage(sessionResult.firstError, taskText.generationFailed)
+            : taskText.generationFailed,
+        })
+      )
+    } else {
+      toast.success(
+        t(taskLocale, "generatedSuccess", {
+          count: visibleImages.length,
+          suffix: pluralSuffix(taskLocale, visibleImages.length),
+        })
+      )
+    }
+  }
+
+  function completeTaskFromError(taskId: string, error: unknown, completedCount: number) {
+    const task = tasksRef.current.find((item) => item.snapshot.id === taskId)
+    if (!task) return
+
+    const taskLocale = task.snapshot.locale
+    const taskText = studioMessages[taskLocale]
+    const isAbort = isGenerationControlError(error, "GenerationAbortError")
+    const isTimeout = isGenerationControlError(error, "GenerationTimeoutError")
+
+    if (isAbort) {
+      toast.warning(
+        completedCount > 0
+          ? t(taskLocale, "generationStoppedPartial", {
+              count: completedCount,
+              suffix: pluralSuffix(taskLocale, completedCount),
+            })
+          : taskText.generationStopped
+      )
+    } else if (isTimeout) {
+      toast.error(
+        completedCount > 0
+          ? t(taskLocale, "generationTimedOutPartial", {
+              count: completedCount,
+              seconds: Math.ceil(task.snapshot.timeoutMs / 1000),
+              suffix: pluralSuffix(taskLocale, completedCount),
+            })
+          : getGenerationErrorMessage(error, t(taskLocale, "generationTimedOut", { seconds: Math.ceil(task.snapshot.timeoutMs / 1000) }))
+      )
+    } else {
+      toast.error(getGenerationErrorMessage(error, taskText.generationFailed))
+    }
+
+    setTasks((current) => {
+      const nextTasks = current.map((item) => {
+        if (item.snapshot.id !== taskId) return item
+
+        const terminalState = isAbort
+          ? {
+              fallbackMessage: studioMessages[item.snapshot.locale].generationStopped,
+              status: "stopped" as ImageTaskStatus,
+            }
+          : isTimeout
+            ? {
+                fallbackMessage: t(item.snapshot.locale, "generationTimedOut", { seconds: Math.ceil(item.snapshot.timeoutMs / 1000) }),
+                status: "timedOut" as ImageTaskStatus,
+              }
+            : {
+                fallbackMessage: studioMessages[item.snapshot.locale].generationFailed,
+                status: "failed" as ImageTaskStatus,
+              }
+        const terminalStatus: ImageTaskStatus = terminalState.status
+        const errorMessage = getGenerationErrorMessage(error, terminalState.fallbackMessage)
+        const keptImages = item.images.slice(0, Math.max(completedCount, item.images.length))
+        const sanitizedSnapshot = sanitizeImageTaskSnapshot(item.snapshot)
+
+        return {
+          ...updateTaskImages(item, keptImages),
+          completedAt: Date.now(),
+          errorMessage,
+          partialErrorMessage: null,
+          progress: terminalStatus === "failed" ? 0 : item.progress,
+          snapshot: {
+            ...item.snapshot,
+            ...sanitizedSnapshot,
+            apiKey: sanitizedSnapshot.apiKey,
+            references: [],
+          },
+          status: terminalStatus,
+        }
+      })
+
+      tasksRef.current = nextTasks
+      return nextTasks
+    })
+  }
+
+  function clearTaskRuntime(taskId: string) {
+    const timeoutId = taskTimeoutsRef.current.get(taskId)
+    if (timeoutId) {
+      window.clearTimeout(timeoutId)
+    }
+
+    taskTimeoutsRef.current.delete(taskId)
+    taskAbortControllersRef.current.delete(taskId)
+    runningTaskIdsRef.current.delete(taskId)
+  }
+
+  async function runTask(task: ImageTask<StudioDebug>, taskController: AbortController) {
+    const taskId = task.snapshot.id
+    let completedCount = 0
+
+    try {
+      const sessionResult = await runImageStudioSession<StudioDebug>({
+        apiKey: task.snapshot.apiKey,
+        background: task.snapshot.background,
+        endpoint: task.snapshot.endpoint,
+        imageCount: task.snapshot.imageCount,
+        images: task.snapshot.references,
+        isControlError: (error) => (
+          isGenerationControlError(error, "GenerationAbortError") ||
+          isGenerationControlError(error, "GenerationTimeoutError")
+        ),
+        locale: task.snapshot.locale,
+        model: task.snapshot.model,
+        onImagesUpdated: (images) => {
+          if (!images.length) return
+
+          completedCount = images.length
+          updateTask(taskId, (item) => ({
+            ...updateTaskImages(item, images),
+            progress: Math.min(95, 8 + Math.round((images.length / item.snapshot.imageCount) * 87)),
+          }))
+        },
+        onProxyResult: (proxyResult) => {
+          updateTask(taskId, (item) => ({
+            ...item,
+            debug: proxyResult.debug || item.debug,
+            endpoint: proxyResult.endpoint,
+            quality: proxyResult.quality || item.quality,
+            qualityReported: proxyResult.qualityReported,
+            size: proxyResult.size || item.size,
+            sizeReported: proxyResult.sizeReported,
+          }))
+        },
+        outputFormat: task.snapshot.outputFormat,
+        prompt: task.snapshot.requestPrompt,
+        quality: task.snapshot.quality,
+        signal: taskController.signal,
+        size: task.snapshot.size,
+        timeoutMs: task.snapshot.timeoutMs,
+      })
+
+      if (isMountedRef.current) {
+        completeTaskFromSessionResult(taskId, sessionResult)
+      }
+    } catch (error) {
+      if (isMountedRef.current) {
+        completeTaskFromError(taskId, error, completedCount)
+      }
+    } finally {
+      clearTaskRuntime(taskId)
+    }
+  }
+
+  async function startTask(taskId: string) {
+    if (!isMountedRef.current) return
+    if (runningTaskIdsRef.current.has(taskId)) {
+      taskStartedAtRef.current.delete(taskId)
+      return
+    }
+
+    const task = tasksRef.current.find((item) => item.snapshot.id === taskId && item.status === "queued")
+
+    if (!task) {
+      taskStartedAtRef.current.delete(taskId)
+      return
+    }
+
+    const taskController = new AbortController()
+    runningTaskIdsRef.current.add(taskId)
+    taskAbortControllersRef.current.set(taskId, taskController)
+
+    const timeoutId = window.setTimeout(() => {
+      taskController.abort(
+        createGenerationControlError(
+          "GenerationTimeoutError",
+          t(task.snapshot.locale, "generationTimedOut", { seconds: Math.ceil(task.snapshot.timeoutMs / 1000) })
+        )
+      )
+    }, task.snapshot.timeoutMs)
+    taskTimeoutsRef.current.set(taskId, timeoutId)
+
+    const startedAt = taskStartedAtRef.current.get(taskId) ?? task.snapshot.submittedAt
+    taskStartedAtRef.current.delete(taskId)
+    const nextTasks = tasksRef.current.map((item) => item.snapshot.id === taskId
+      ? { ...item, status: "running" as const, progress: 8, startedAt, errorMessage: null, partialErrorMessage: null }
+      : item
+    )
+
+    tasksRef.current = nextTasks
+    setTasks(nextTasks)
+    setElapsedNow(startedAt)
+
+    void runTask(task, taskController)
+  }
+
+  function startRunnableQueuedTasks() {
+    if (!isMountedRef.current) return
+
+    const runnableTaskIds = getNextRunnableTaskIds(tasksRef.current, clampMaxConcurrentTasks(maxConcurrentTasks))
+    if (!runnableTaskIds.length) return
+
+    const startedAt = Date.now()
+
+    for (const taskId of runnableTaskIds) {
+      taskStartedAtRef.current.set(taskId, startedAt)
+      startTask(taskId)
+    }
+  }
+
+  function scheduleRunnableQueuedTasks() {
+    if (!isMountedRef.current) return
+
+    if (schedulerTimeoutRef.current) {
+      window.clearTimeout(schedulerTimeoutRef.current)
+    }
+
+    schedulerTimeoutRef.current = window.setTimeout(() => {
+      schedulerTimeoutRef.current = null
+      startRunnableQueuedTasks()
+    }, 0)
+  }
+
+  useEffect(() => {
+    scheduleRunnableQueuedTasksRef.current = scheduleRunnableQueuedTasks
+  })
+
+  const startRunnableTaskIds = useEffectEvent((runnableTaskIds: string[]) => {
+    if (!runnableTaskIds.length) return
+
+    const startedAt = Date.now()
+
+    for (const taskId of runnableTaskIds) {
+      taskStartedAtRef.current.set(taskId, startedAt)
+      startTask(taskId)
+    }
+  })
+
+  useEffect(() => {
+    const runnableTaskIds = getNextRunnableTaskIds(tasks, maxConcurrentTasks)
+    startRunnableTaskIds(runnableTaskIds)
+  }, [tasks, maxConcurrentTasks])
+
+  async function enqueueGenerationTask(
     requestApiKey?: string,
     options?: { skipRememberPrompt?: boolean }
   ) {
-    if (progressResetTimeoutRef.current) {
-      window.clearTimeout(progressResetTimeoutRef.current)
-      progressResetTimeoutRef.current = null
-    }
-
     if (!prompt.trim()) {
       toast.error(text.promptRequired)
       return
@@ -1643,185 +2034,39 @@ export function ImageStudio({
       setPendingGenerationAfterRemember(false)
     }
 
-    const generationController = new AbortController()
-
-    generationAbortControllerRef.current = generationController
-    generationTimeoutRef.current = window.setTimeout(() => {
-      generationController.abort(
-        createGenerationControlError(
-          "GenerationTimeoutError",
-          t(locale, "generationTimedOut", { seconds: normalizedRequestTimeoutSeconds })
-        )
-      )
-    }, requestTimeoutMs)
-
-    setIsGenerating(true)
-    setGenerationStartedAt(Date.now())
-    setElapsedGenerationSeconds(0)
-    setProgress(8)
-    if (result) {
-      setHistory((current) => appendImageStudioHistory(current, result, IMAGE_STUDIO_HISTORY_LIMIT))
-    }
-    setResult(null)
-    setSelectedImageIndex(0)
-
     const total = Math.min(Math.max(imageCount, 1), 4)
-    const requestPrompt = buildRequestPrompt(prompt, activeSource)
-    let collectedEndpoint = ""
-    let completedCount = 0
+    const taskId = createClientId()
+    const snapshot = createImageTaskSnapshot({
+      requestPrompt: buildRequestPrompt(prompt, activeSource),
+      apiKey: effectiveApiKey,
+      background,
+      endpoint: endpoint.trim(),
+      generation: activeSource ? activeSource.round + 1 : 1,
+      id: taskId,
+      imageCount: total,
+      locale,
+      model,
+      outputFormat,
+      prompt,
+      quality,
+      references: inputUploads.map((upload) => upload.file),
+      size,
+      sourceLabel: activeSource?.label,
+      submittedAt: Date.now(),
+      timeoutMs: requestTimeoutMs,
+    })
 
-    try {
-      let resultDebug: StudioDebug | null = null
-      let resultQuality = quality
-      let resultQualityReported = false
-      let resultSize = size
-      let resultSizeReported = false
-
-      const createResult = (visibleImages: GeneratedImage[]): StudioResponse => ({
-        endpoint: collectedEndpoint,
-        id: createClientId(),
-        generation: nextGeneration,
-        debug: resultDebug,
-        images: visibleImages,
-        model,
-        outputFormat,
-        prompt: prompt.trim(),
-        quality: resultQuality,
-        qualityReported: resultQualityReported,
-        requestedCount: total,
-        size: resultSize,
-        sizeReported: resultSizeReported,
-        sourceLabel: activeSource?.label,
-      })
-
-      const publishResult = (visibleImages: GeneratedImage[]) => {
-        if (!visibleImages.length) {
-          return
-        }
-
-        completedCount = visibleImages.length
-        setResult(createResult(visibleImages))
-        setSelectedImageIndex((current) => current < visibleImages.length ? current : 0)
-        setProgress(Math.min(95, 8 + Math.round((visibleImages.length / total) * 87)))
-      }
-
-      const applyProxyResult = (proxyResult: {
-        debug: StudioDebug | null
-        endpoint: string
-        quality: string | null
-        qualityReported: boolean
-        size: string | null
-        sizeReported: boolean
-      }) => {
-        collectedEndpoint = proxyResult.endpoint
-        resultDebug = proxyResult.debug || resultDebug
-        resultQuality = proxyResult.quality || quality
-        resultQualityReported = proxyResult.qualityReported
-        resultSize = proxyResult.size || size
-        resultSizeReported = proxyResult.sizeReported
-      }
-
-      const sessionResult = await runImageStudioSession<StudioDebug>({
-        apiKey: effectiveApiKey,
-        background,
-        endpoint: endpoint.trim(),
-        imageCount: total,
-        images: inputUploads.map((upload) => upload.file),
-        isControlError: (error) => (
-          isGenerationControlError(error, "GenerationAbortError") ||
-          isGenerationControlError(error, "GenerationTimeoutError")
-        ),
-        locale,
-        model,
-        onImagesUpdated: publishResult,
-        onProxyResult: applyProxyResult,
-        outputFormat,
-        prompt: requestPrompt,
-        quality,
-        signal: generationController.signal,
-        size,
-        timeoutMs: requestTimeoutMs,
-      })
-
-      if (!sessionResult.images.length) {
-        throw sessionResult.firstError instanceof Error
-          ? sessionResult.firstError
-          : new Error(text.allRequestsFailed)
-      }
-
-      const visibleImages = sessionResult.images.slice(0, total)
-
-      completedCount = visibleImages.length
-      setResult(createResult(visibleImages))
-      setSelectedImageIndex((current) => current < visibleImages.length ? current : 0)
-      setProgress(100)
-
-      if (sessionResult.isPartial) {
-        toast.warning(
-          t(locale, "generatedPartialWarning", {
-            count: visibleImages.length,
-            total,
-            error: sessionResult.firstError
-              ? getGenerationErrorMessage(sessionResult.firstError, text.generationFailed)
-              : text.generationFailed,
-          })
-        )
-      } else {
-        toast.success(
-          t(locale, "generatedSuccess", {
-            count: visibleImages.length,
-            suffix: pluralSuffix(locale, visibleImages.length),
-          })
-        )
-      }
-
-      progressResetTimeoutRef.current = window.setTimeout(() => {
-        setProgress(0)
-        setElapsedGenerationSeconds(0)
-        progressResetTimeoutRef.current = null
-        setGenerationStartedAt(null)
-      }, 900)
-    } catch (error) {
-      if (isGenerationControlError(error, "GenerationAbortError")) {
-        toast.warning(
-          completedCount > 0
-            ? t(locale, "generationStoppedPartial", {
-                count: completedCount,
-                suffix: pluralSuffix(locale, completedCount),
-              })
-            : text.generationStopped
-        )
-      } else if (isGenerationControlError(error, "GenerationTimeoutError")) {
-        toast.error(
-          completedCount > 0
-            ? t(locale, "generationTimedOutPartial", {
-                count: completedCount,
-                seconds: normalizedRequestTimeoutSeconds,
-                suffix: pluralSuffix(locale, completedCount),
-              })
-            : getGenerationErrorMessage(error, text.generationFailed)
-        )
-      } else {
-        toast.error(getGenerationErrorMessage(error, text.generationFailed))
-      }
-
-      setProgress(0)
-      setElapsedGenerationSeconds(0)
-      setGenerationStartedAt(null)
-    } finally {
-      if (generationTimeoutRef.current) {
-        window.clearTimeout(generationTimeoutRef.current)
-        generationTimeoutRef.current = null
-      }
-
-      generationAbortControllerRef.current = null
-      setIsGenerating(false)
-    }
+    setTasks((current) => {
+      const nextTasks = [...current, createQueuedImageTask<StudioDebug>(snapshot)]
+      tasksRef.current = nextTasks
+      return nextTasks
+    })
+    setSelectedTaskId(taskId)
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    void startGeneration()
+    void enqueueGenerationTask()
   }
 
   return (
@@ -2157,6 +2402,36 @@ export function ImageStudio({
                     {t(locale, "countDescription", { count: imageCount })}
                   </FieldDescription>
                 </Field>
+
+                <Field>
+                  <div className="flex items-center justify-between">
+                    <FieldLabel htmlFor="max-concurrent-tasks" className="text-xs font-semibold text-muted-foreground">
+                      {text.maxConcurrentTasks}
+                    </FieldLabel>
+                    <span className="font-mono text-xs text-foreground">×{maxConcurrentTasks}</span>
+                  </div>
+                  <Select
+                    items={[1, 2, 3, 4].map((value) => ({ label: String(value), value: String(value) }))}
+                    value={String(maxConcurrentTasks)}
+                    onValueChange={(value) => setMaxConcurrentTasks(clampMaxConcurrentTasks(Number(value)))}
+                  >
+                    <SelectTrigger id="max-concurrent-tasks" className="studio-control h-11 w-full rounded-md font-mono text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {[1, 2, 3, 4].map((value) => (
+                          <SelectItem key={value} value={String(value)}>
+                            {value}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <FieldDescription className="text-xs">
+                    {t(locale, "maxConcurrentTasksDescription", { count: maxConcurrentTasks })}
+                  </FieldDescription>
+                </Field>
               </FieldGroup>
             </Section>
 
@@ -2357,7 +2632,6 @@ export function ImageStudio({
               <Button
                 type="submit"
                 size="lg"
-                disabled={isGenerating}
                 className="studio-primary-button h-[52px] flex-1 justify-center rounded-lg text-base font-semibold tracking-tight"
               >
                 <span
@@ -2368,34 +2642,22 @@ export function ImageStudio({
                   <LoaderCircleIcon
                     className={cn(
                       "absolute transition-opacity",
-                      isGenerating ? "animate-spin opacity-100" : "opacity-0"
+                      isAnyTaskRunning ? "animate-spin opacity-100" : "opacity-0"
                     )}
                   />
-                  <PlayIcon className={cn("transition-opacity", isGenerating ? "opacity-0" : "opacity-100")} />
+                  <PlayIcon className={cn("transition-opacity", isAnyTaskRunning ? "opacity-0" : "opacity-100")} />
                 </span>
-                {isGenerating ? text.generating : activeSource ? workflow.continueGeneration : text.generateImages}
+                {activeSource ? workflow.continueGeneration : text.generateImages}
                 <span className="ml-2 text-xs font-medium opacity-80">
                   ×{imageCount}
                 </span>
               </Button>
-              {isGenerating && (
-                <Button
-                  type="button"
-                  size="lg"
-                  variant="outline"
-                  onClick={stopGeneration}
-                  className="h-[52px] shrink-0 rounded-lg px-4 text-sm font-semibold"
-                >
-                  <XIcon data-icon="inline-start" />
-                  {text.stopGeneration}
-                </Button>
-              )}
             </div>
             <Progress
-              value={progress}
+              value={selectedTaskProgress}
               className={cn(
                 "h-1.5 rounded-sm transition-opacity duration-300",
-                isGenerating || progress > 0 ? "opacity-100" : "opacity-0"
+                isSelectedTaskRunning || selectedTaskProgress > 0 ? "opacity-100" : "opacity-0"
               )}
             />
           </div>
@@ -2407,182 +2669,237 @@ export function ImageStudio({
             <div>
               <span className="text-sm font-semibold text-foreground">{text.creativeCanvas}</span>
               <span className="ml-2 text-sm text-muted-foreground">
-                {result
+                {selectedTask?.images.length
                   ? t(locale, "generatedCountLabel", {
-                      count: result.images.length === result.requestedCount
-                        ? result.images.length
-                        : `${result.images.length}/${result.requestedCount}`,
-                      suffix: pluralSuffix(locale, result.images.length),
+                      count: selectedTask.images.length === selectedTask.snapshot.imageCount
+                        ? selectedTask.images.length
+                        : `${selectedTask.images.length}/${selectedTask.snapshot.imageCount}`,
+                      suffix: pluralSuffix(locale, selectedTask.images.length),
                     })
                   : text.readyForNextConcept}
               </span>
             </div>
             <div className="flex items-center gap-2">
-              {isGenerating && generationStartedAt && (
+              {isSelectedTaskRunning && selectedTaskStartedAt && (
                 <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:flex">
                   <LoaderCircleIcon className="size-3.5 animate-spin text-primary" />
                   <span>{text.generating}</span>
                   <span className="text-border">·</span>
                   <span className="font-mono text-[11px]">
-                    {elapsedGenerationSeconds}s
+                    {selectedTaskElapsedSeconds}s
                   </span>
                 </div>
               )}
-              <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:flex">
-                <KeyRoundIcon className="size-3" />
-                {apiKey ? text.keySet : text.noKey}
-                <span className="text-border">·</span>
-                <span className="max-w-[260px] truncate font-mono text-[11px]">
-                  {endpoint}
-                </span>
-              </div>
+              {selectedTask && (
+                <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:flex">
+                  <KeyRoundIcon className="size-3" />
+                  {selectedTask.snapshot.apiKeySet ? text.keySet : text.noKey}
+                  <span className="text-border">·</span>
+                  <span className="max-w-[260px] truncate font-mono text-[11px]">
+                    {sanitizeEndpointForDisplay(selectedTask.endpoint || selectedTask.snapshot.endpoint)}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="relative flex-1 overflow-y-auto p-5">
-            {result?.images.length ? (
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-                <section className="flex min-w-0 flex-col gap-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <MousePointer2Icon className="size-4 text-primary" />
-                      <span>
-                        {workflow.selected}: {String(selectedImageNumber).padStart(2, "0")}
-                      </span>
+            <div className="flex flex-col gap-5">
+              <TaskQueueList
+                elapsedNow={elapsedNow}
+                locale={locale}
+                selectedTaskId={selectedTaskId}
+                tasks={tasks}
+                text={text}
+                onRemoveQueuedTask={removeQueuedTask}
+                onSelectTask={setSelectedTaskId}
+                onStopTask={stopTask}
+              />
+
+              {!selectedTask && (
+                <EmptyResultState title={text.readyForNextConcept} description={text.idleDescription} />
+              )}
+
+              {selectedTask?.status === "queued" && (
+                <EmptyResultState
+                  title={text.renderingImages}
+                  description={t(locale, "taskQueuePosition", {
+                    position: selectedQueuePosition,
+                    prompt: selectedTask.snapshot.prompt,
+                  })}
+                />
+              )}
+
+              {selectedTask?.status === "running" && !selectedTaskHasImages && (
+                <GenerationSkeleton count={selectedTask.snapshot.imageCount} workflow={workflow} />
+              )}
+
+              {selectedTask && (
+                selectedTask.status === "partial" ||
+                (selectedTaskHasImages && ["failed", "stopped", "timedOut"].includes(selectedTask.status))
+              ) && <TaskStatusCallout task={selectedTask} />}
+
+              {selectedTaskHasImages && selectedTask && (
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+                  <section className="flex min-w-0 flex-col gap-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <MousePointer2Icon className="size-4 text-primary" />
+                        <span>
+                          {workflow.selected}: {String(selectedTaskImageNumber).padStart(2, "0")}
+                        </span>
+                      </div>
+                      <Badge variant="secondary" className="rounded-md px-3 py-1">
+                        {workflow.generatedAsset} · {selectedTask.images.length === selectedTask.snapshot.imageCount
+                          ? selectedTask.images.length
+                          : `${selectedTask.images.length}/${selectedTask.snapshot.imageCount}`}
+                      </Badge>
                     </div>
-                    <Badge variant="secondary" className="rounded-md px-3 py-1">
-                      {workflow.generatedAsset} · {result.images.length === result.requestedCount
-                        ? result.images.length
-                        : `${result.images.length}/${result.requestedCount}`}
-                    </Badge>
-                  </div>
 
-                  <div className="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
-                    {result.images.map((image, index) => {
-                      const isSelected = index === selectedImageIndex
+                    <div className="grid gap-5 [grid-template-columns:repeat(auto-fill,minmax(260px,1fr))]">
+                      {selectedTask.images.map((image, index) => {
+                        const isSelected = index === selectedTask.selectedImageIndex
 
-                      return (
-                        <article
-                          key={`${image.src}-${index}`}
-                          className={cn(
-                            "group relative flex flex-col overflow-hidden rounded-lg border bg-card shadow-[0_24px_70px_-50px_rgba(0,0,0,0.9)] transition-colors duration-200",
-                            isSelected
-                              ? "border-primary bg-primary/5 ring-[3px] ring-primary/15"
-                              : "border-border opacity-90 hover:border-foreground/30 hover:opacity-100"
-                          )}
-                        >
-                          {isSelected && (
-                            <div
-                              aria-hidden="true"
-                              className="pointer-events-none absolute inset-0 z-10 rounded-lg ring-1 ring-inset ring-primary"
-                            />
-                          )}
-                          <button
-                            type="button"
-                            aria-label={`${workflow.selectImage} ${index + 1}`}
-                            aria-pressed={isSelected}
-                            onClick={() => setSelectedImageIndex(index)}
-                            className="relative cursor-pointer bg-background text-left outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+                        return (
+                          <article
+                            key={`${selectedTask.snapshot.id}-${index}`}
+                            className={cn(
+                              "group relative flex flex-col overflow-hidden rounded-lg border bg-card shadow-[0_24px_70px_-50px_rgba(0,0,0,0.9)] transition-colors duration-200",
+                              isSelected
+                                ? "border-primary bg-primary/5 ring-[3px] ring-primary/15"
+                                : "border-border opacity-90 hover:border-foreground/30 hover:opacity-100"
+                            )}
                           >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              alt={`${text.generateImages} ${index + 1}`}
-                              className={cn(
-                                "w-full object-cover transition duration-300 group-hover:scale-[1.015]",
-                                getSizePreviewClass(result.size)
-                              )}
-                              style={getSizePreviewStyle(result.size)}
-                              src={image.src}
-                            />
-                            <div className="absolute left-3 top-3 rounded-md bg-background/80 px-2.5 py-1 text-xs font-semibold text-foreground shadow-sm backdrop-blur">
-                              {String(index + 1).padStart(2, "0")}
-                            </div>
                             {isSelected && (
-                              <Badge className="absolute right-3 top-3 rounded-md px-3 py-1.5 text-[11px] shadow-xl ring-1 ring-background/70">
-                                <CheckCircle2Icon data-icon="inline-start" />
-                                {workflow.selected}
-                              </Badge>
+                              <div
+                                aria-hidden="true"
+                                className="pointer-events-none absolute inset-0 z-10 rounded-lg ring-1 ring-inset ring-primary"
+                              />
                             )}
-                            {isSelected && (
-                              <div className="absolute inset-x-3 bottom-3 rounded-md bg-primary px-3 py-2 text-center text-xs font-semibold text-primary-foreground shadow-xl">
-                                {workflow.selectedAsset} · {String(index + 1).padStart(2, "0")}
+                            <button
+                              type="button"
+                              aria-label={`${workflow.selectImage} ${index + 1}`}
+                              aria-pressed={isSelected}
+                              onClick={() => selectedTask && updateTaskSelectedImageIndex(selectedTask.snapshot.id, index)}
+                              className="relative cursor-pointer bg-background text-left outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                alt={`${text.generateImages} ${index + 1}`}
+                                className={cn(
+                                  "w-full object-cover transition duration-300 group-hover:scale-[1.015]",
+                                  getSizePreviewClass(selectedTask.size)
+                                )}
+                                style={getSizePreviewStyle(selectedTask.size)}
+                                src={image.src}
+                              />
+                              <div className="absolute left-3 top-3 rounded-md bg-background/80 px-2.5 py-1 text-xs font-semibold text-foreground shadow-sm backdrop-blur">
+                                {String(index + 1).padStart(2, "0")}
                               </div>
-                            )}
-                          </button>
-
-                          <div className="flex flex-col gap-3 border-t px-4 py-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-                                {result.outputFormat.toUpperCase()} · {result.size}
-                              </span>
-                              {image.revisedPrompt && (
-                                <Badge variant="outline" className="rounded-md bg-muted/40 text-[10px]">
-                                  <SparklesIcon data-icon="inline-start" />
-                                  prompt
+                              {isSelected && (
+                                <Badge className="absolute right-3 top-3 rounded-md px-3 py-1.5 text-[11px] shadow-xl ring-1 ring-background/70">
+                                  <CheckCircle2Icon data-icon="inline-start" />
+                                  {workflow.selected}
                                 </Badge>
                               )}
-                            </div>
-                            <div className="grid grid-cols-2 gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                className="h-9 rounded-md"
-                                onClick={() => setGeneratedImageAsSource(index)}
-                              >
-                                <ImagePlusIcon data-icon="inline-start" />
-                                {workflow.setAsSource}
-                              </Button>
-                              <a
-                                className={cn(
-                                  buttonVariants({ size: "sm", variant: "outline" }),
-                                  "h-9 rounded-md bg-muted/40 px-3 text-xs font-semibold"
-                                )}
-                                download={`imgx-${index + 1}.${result.outputFormat}`}
-                                href={image.src}
-                              >
-                                <ArrowDownToLineIcon data-icon="inline-start" />
-                                {text.save}
-                              </a>
-                            </div>
-                          </div>
-                        </article>
-                      )
-                    })}
-                    {isGenerating &&
-                      Array.from(
-                        { length: Math.max(result.requestedCount - result.images.length, 0) },
-                        (_, index) => <PendingImageCard key={`pending-${index}`} />
-                      )}
-                  </div>
-                </section>
+                              {isSelected && (
+                                <div className="absolute inset-x-3 bottom-3 rounded-md bg-primary px-3 py-2 text-center text-xs font-semibold text-primary-foreground shadow-xl">
+                                  {workflow.selectedAsset} · {String(index + 1).padStart(2, "0")}
+                                </div>
+                              )}
+                            </button>
 
-                <RemixPanel
-                  image={selectedImage}
-                  imageIndex={selectedImageNumber}
-                  isCjk={isCjk}
-                  outputFormat={result.outputFormat}
-                  prompt={prompt}
-                  size={result.size}
-                  workflow={workflow}
-                  onCopyPrompt={copyPromptToClipboard}
-                  onSelectRecipe={(recipeId) => setGeneratedImageAsSource(selectedImageNumber - 1, recipeId)}
-                  onStageReference={() => setGeneratedImageAsSource(selectedImageNumber - 1)}
-                  onUseRevisedPrompt={(value) => updatePrompt(value)}
+                            <div className="flex flex-col gap-3 border-t px-4 py-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+                                  {selectedTask.snapshot.outputFormat.toUpperCase()} · {selectedTask.size}
+                                </span>
+                                {image.revisedPrompt && (
+                                  <Badge variant="outline" className="rounded-md bg-muted/40 text-[10px]">
+                                    <SparklesIcon data-icon="inline-start" />
+                                    {selectedTask.snapshot.prompt}
+                                  </Badge>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="secondary"
+                                  className="h-9 rounded-md"
+                                  onClick={() => setGeneratedImageAsSource(index)}
+                                >
+                                  <ImagePlusIcon data-icon="inline-start" />
+                                  {workflow.setAsSource}
+                                </Button>
+                                <a
+                                  className={cn(
+                                    buttonVariants({ size: "sm", variant: "outline" }),
+                                    "h-9 rounded-md bg-muted/40 px-3 text-xs font-semibold"
+                                  )}
+                                  download={`imgx-${index + 1}.${selectedTask.snapshot.outputFormat}`}
+                                  href={image.src}
+                                >
+                                  <ArrowDownToLineIcon data-icon="inline-start" />
+                                  {text.save}
+                                </a>
+                              </div>
+                            </div>
+                          </article>
+                        )
+                      })}
+                      {selectedTask.status === "running" && Array.from(
+                        { length: selectedPendingCount },
+                        (_, index) => <PendingImageCard key={`pending-${selectedTask.snapshot.id}-${index}`} />
+                      )}
+                    </div>
+                  </section>
+
+                  <RemixPanel
+                    image={selectedTaskImage}
+                    imageIndex={selectedTaskImageNumber}
+                    isCjk={isCjk}
+                    outputFormat={selectedTask?.snapshot.outputFormat || outputFormat}
+                    prompt={selectedTask.snapshot.prompt}
+                    size={selectedTask?.size || selectedTask?.snapshot.size || size}
+                    workflow={workflow}
+                    onCopyPrompt={copyPromptToClipboard}
+                    onSelectRecipe={(recipeId) => setGeneratedImageAsSource(selectedTaskImageNumber - 1, recipeId)}
+                    onStageReference={() => setGeneratedImageAsSource(selectedTaskImageNumber - 1)}
+                    onUseRevisedPrompt={(value) => updatePrompt(value)}
+                  />
+                </div>
+              )}
+
+              {selectedTask?.status === "failed" && !selectedTaskHasImages && (
+                <EmptyResultState
+                  title={studioMessages[selectedTask.snapshot.locale].generationFailed}
+                  description={t(selectedTask.snapshot.locale, "taskFailedInline", {
+                    error: selectedTask.errorMessage || studioMessages[selectedTask.snapshot.locale].generationFailed,
+                  })}
                 />
-              </div>
-            ) : isGenerating ? (
-              <GenerationSkeleton count={imageCount} workflow={workflow} />
-            ) : !history.length ? (
-              <EmptyCanvas
-                imageCount={imageCount}
-                isCjk={isCjk}
-                model={model}
-                outputFormat={outputFormat}
-                size={size}
-                text={text}
-              />
-            ) : null}
+              )}
+
+              {selectedTask?.status === "stopped" && !selectedTaskHasImages && (
+                <EmptyResultState
+                  title={studioMessages[selectedTask.snapshot.locale].generationStopped}
+                  description={t(selectedTask.snapshot.locale, "taskStoppedInline", {
+                    count: selectedTask.images.length,
+                    suffix: pluralSuffix(selectedTask.snapshot.locale, selectedTask.images.length),
+                  })}
+                />
+              )}
+
+              {selectedTask?.status === "timedOut" && !selectedTaskHasImages && (
+                <EmptyResultState
+                  title={t(selectedTask.snapshot.locale, "generationTimedOut", { seconds: Math.ceil(selectedTask.snapshot.timeoutMs / 1000) })}
+                  description={t(selectedTask.snapshot.locale, "taskTimedOutInline", {
+                    count: selectedTask.images.length,
+                    suffix: pluralSuffix(selectedTask.snapshot.locale, selectedTask.images.length),
+                  })}
+                />
+              )}
+            </div>
 
             {history.length > 0 && (
               <div className="flex flex-col gap-6 border-t pt-5">
@@ -2636,28 +2953,28 @@ export function ImageStudio({
             )}
           </div>
 
-          {result && (
+          {selectedTask && (
             <div className="relative border-t bg-background/70 px-5 py-4 backdrop-blur">
               <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
                 {[
-                  [text.summaryModel, result.model],
-                  [text.summarySize, result.sizeReported ? result.size : `${result.size} (${text.summaryRequested})`],
+                  [text.summaryModel, selectedTask.snapshot.model],
+                  [text.summarySize, selectedTask.sizeReported ? selectedTask.size : `${selectedTask.size} (${text.summaryRequested})`],
                   [
                     text.summaryQuality,
-                    result.qualityReported
-                      ? qualityLabelByValue[result.quality] || result.quality
-                      : `${qualityLabelByValue[result.quality] || result.quality} (${text.summaryRequested})`,
+                    selectedTask.qualityReported
+                      ? qualityLabelByValue[selectedTask.quality] || selectedTask.quality
+                      : `${qualityLabelByValue[selectedTask.quality] || selectedTask.quality} (${text.summaryRequested})`,
                   ],
-                  [text.summaryFormat, result.outputFormat.toUpperCase()],
+                  [text.summaryFormat, selectedTask.snapshot.outputFormat.toUpperCase()],
                   [
                     text.summaryCount,
-                    result.images.length === result.requestedCount
-                      ? String(result.images.length)
-                      : `${result.images.length} / ${result.requestedCount}`,
+                    selectedTask.images.length === selectedTask.snapshot.imageCount
+                      ? String(selectedTask.images.length)
+                      : `${selectedTask.images.length} / ${selectedTask.snapshot.imageCount}`,
                   ],
-                  [workflow.activeSource, result.sourceLabel || workflow.sourceRound.replace("{round}", String(result.generation))],
-                  [text.summaryRefs, String(inputUploadCount)],
-                  [text.summaryEndpoint, result.endpoint],
+                  [workflow.activeSource, selectedTask.snapshot.sourceLabel || workflow.sourceRound.replace("{round}", String(selectedTask.snapshot.generation))],
+                  [text.summaryRefs, String(selectedTask.snapshot.referenceNames.length)],
+                  [text.summaryEndpoint, sanitizeEndpointForDisplay(selectedTask.endpoint || selectedTask.snapshot.endpoint)],
                 ].map(([key, value]) => (
                   <div
                     key={key}
@@ -2677,7 +2994,7 @@ export function ImageStudio({
                   </div>
                 ))}
               </div>
-              {result.debug && (
+              {selectedTask.debug && (
                 <details className="group mt-4 rounded-lg border bg-muted/20 px-4 py-3">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold text-muted-foreground [&::-webkit-details-marker]:hidden">
                     <span>{text.debugPanelTitle}</span>
@@ -2692,7 +3009,7 @@ export function ImageStudio({
                         {text.debugRequest}
                       </div>
                       <pre className="max-h-80 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-[11px] leading-5 text-foreground/80 whitespace-pre-wrap break-words">
-                        {JSON.stringify(result.debug.request, null, 2)}
+                        {JSON.stringify(selectedTask.debug.request, null, 2)}
                       </pre>
                     </div>
                     <div className="rounded-lg border bg-background/80 p-3">
@@ -2700,7 +3017,7 @@ export function ImageStudio({
                         {text.debugResponse}
                       </div>
                       <pre className="max-h-80 overflow-auto rounded-md border bg-muted/30 p-3 font-mono text-[11px] leading-5 text-foreground/80 whitespace-pre-wrap break-words">
-                        {JSON.stringify(result.debug.response, null, 2)}
+                        {JSON.stringify(selectedTask.debug.response, null, 2)}
                       </pre>
                     </div>
                   </div>
@@ -2714,48 +3031,171 @@ export function ImageStudio({
   )
 }
 
-function EmptyCanvas({
-  imageCount,
-  isCjk,
-  model,
-  outputFormat,
-  size,
+function getTaskStatusLabel(text: StudioMessages, status: ImageTaskStatus) {
+  const labels: Record<ImageTaskStatus, string> = {
+    completed: text.taskStatusCompleted,
+    failed: text.taskStatusFailed,
+    partial: text.taskStatusPartial,
+    queued: text.taskStatusQueued,
+    running: text.taskStatusRunning,
+    stopped: text.taskStatusStopped,
+    timedOut: text.taskStatusTimedOut,
+  }
+
+  return labels[status]
+}
+
+function formatTaskEndpoint(value: string) {
+  try {
+    const url = new URL(value)
+    return url.host
+  } catch {
+    return value.length > 36 ? `${value.slice(0, 34)}...` : value
+  }
+}
+
+function TaskQueueList({
+  elapsedNow,
+  locale,
+  selectedTaskId,
+  tasks,
   text,
+  onRemoveQueuedTask,
+  onSelectTask,
+  onStopTask,
 }: {
-  imageCount: number
-  isCjk: boolean
-  model: string
-  outputFormat: string
-  size: string
+  elapsedNow: number
+  locale: Locale
+  selectedTaskId: string | null
+  tasks: ImageTask<StudioDebug>[]
   text: StudioMessages
+  onRemoveQueuedTask: (taskId: string) => void
+  onSelectTask: (taskId: string) => void
+  onStopTask: (taskId: string) => void
+}) {
+  if (!tasks.length) {
+    return <p className="text-xs text-muted-foreground">{text.taskQueueEmpty}</p>
+  }
+
+  return (
+    <section aria-label={text.taskQueueTitle} className="mb-5 flex flex-col gap-2">
+      {tasks.map((task) => {
+        const status = task.status
+        const { apiKeySet } = task.snapshot
+        const isSelected = task.snapshot.id === selectedTaskId
+        const elapsedSeconds = task.startedAt ? Math.max(0, Math.floor((elapsedNow - task.startedAt) / 1000)) : 0
+        const generatedLabel = `${task.images.length} / ${task.snapshot.imageCount}`
+        const terminalDurationSeconds = task.startedAt && task.completedAt ? Math.max(0, Math.floor((task.completedAt - task.startedAt) / 1000)) : null
+
+        return (
+          <article
+            key={task.snapshot.id}
+            data-task-id={task.snapshot.id}
+            data-task-status={status}
+            className={cn("rounded-lg border bg-muted/25 p-3", isSelected && "border-primary bg-primary/5")}
+          >
+            <button
+              type="button"
+              aria-pressed={isSelected}
+              className="w-full text-left"
+              onClick={() => onSelectTask(task.snapshot.id)}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="line-clamp-1 text-sm font-medium text-foreground">{task.snapshot.prompt}</span>
+                <Badge variant={status === "running" ? "default" : "secondary"} className="rounded-md">
+                  {getTaskStatusLabel(text, status)}
+                </Badge>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                <span>{generatedLabel}</span>
+                <span>×{task.snapshot.imageCount}</span>
+                <span>{task.snapshot.model}</span>
+                <span>{task.snapshot.size}</span>
+                <span>{task.snapshot.outputFormat.toUpperCase()}</span>
+                <span>{t(locale, "taskRefsLabel", { count: task.snapshot.referenceNames.length })}</span>
+                <span>{formatTaskEndpoint(task.endpoint || task.snapshot.endpoint)}</span>
+                <span>{apiKeySet ? text.keySet : text.noKey}</span>
+                {status === "running" && <span>{elapsedSeconds}s</span>}
+                {status !== "queued" && status !== "running" && terminalDurationSeconds !== null && <span>{terminalDurationSeconds}s</span>}
+              </div>
+              {status === "running" && <Progress value={task.progress} className="mt-3 h-1.5" />}
+            </button>
+            <div className="mt-3 flex justify-end gap-2">
+              {status === "running" && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`${text.stopGeneration}: ${task.snapshot.prompt}`}
+                  onClick={() => onStopTask(task.snapshot.id)}
+                >
+                  {text.stopGeneration}
+                </Button>
+              )}
+              {status === "queued" && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`${text.removeQueuedTask}: ${task.snapshot.prompt}`}
+                  onClick={() => onRemoveQueuedTask(task.snapshot.id)}
+                >
+                  {text.removeQueuedTask}
+                </Button>
+              )}
+            </div>
+          </article>
+        )
+      })}
+    </section>
+  )
+}
+
+function EmptyResultState({
+  description,
+  title,
+}: {
+  description: string
+  title: string
 }) {
   return (
     <div className="relative flex h-full min-h-[66vh] flex-col overflow-hidden rounded-lg border bg-background/40">
-      <div className="flex items-center justify-between gap-3 border-b px-5 py-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-foreground">{text.creativeCanvas}</p>
-          <p className="text-xs text-muted-foreground">{text.readyForNextConcept}</p>
-        </div>
-        <div className="hidden items-center gap-2 sm:flex">
-          <Badge variant="secondary" className="rounded-md font-mono text-[11px]">
-            {model}
-          </Badge>
-          <Badge variant="outline" className="rounded-md bg-muted/30 font-mono text-[11px]">
-            {size} · {outputFormat.toUpperCase()} · x{imageCount}
-          </Badge>
-        </div>
-      </div>
-
       <Empty className="min-h-[520px] flex-1 border-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.035),transparent_42%)]">
         <EmptyHeader>
-          <EmptyTitle>{text.readyForNextConcept}</EmptyTitle>
-          <EmptyDescription className={cn("max-w-md text-xs", isCjk && "leading-6")}>
-            {text.idleDescription}
+          <EmptyTitle>{title}</EmptyTitle>
+          <EmptyDescription className="max-w-md text-xs">
+            {description}
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
     </div>
   )
+}
+
+function TaskStatusCallout({ task }: { task: ImageTask<StudioDebug> }) {
+  const taskLocale = task.snapshot.locale
+  const taskText = studioMessages[taskLocale]
+  const count = task.images.length
+  const total = task.snapshot.imageCount
+  const suffix = pluralSuffix(taskLocale, count)
+
+  if (task.status === "partial") {
+    return <div role="status" className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">{t(taskLocale, "taskPartialInline", { count, total, error: task.partialErrorMessage || taskText.generationFailed })}</div>
+  }
+
+  if (task.status === "failed") {
+    return <div role="status" className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm">{t(taskLocale, "taskFailedInline", { error: task.errorMessage || taskText.generationFailed })}</div>
+  }
+
+  if (task.status === "stopped") {
+    return <div role="status" className="rounded-lg border bg-muted/40 p-3 text-sm">{t(taskLocale, "taskStoppedInline", { count, suffix })}</div>
+  }
+
+  if (task.status === "timedOut") {
+    return <div role="status" className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm">{t(taskLocale, "taskTimedOutInline", { count, suffix })}</div>
+  }
+
+  return null
 }
 
 function GenerationSkeleton({

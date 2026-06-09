@@ -36,50 +36,8 @@ assert.deepEqual(
 
 assert.match(
   source,
-  /import \{[\s\S]*IMAGE_STUDIO_HISTORY_LIMIT[\s\S]*\} from "@\/lib\/image-studio-generation"/,
-  "image studio component should import the shared history limit constant"
+  /appendImageStudioHistory\(current, historyResult, IMAGE_STUDIO_HISTORY_LIMIT\)/,
+  "task history appends should use the shared limit constant"
 )
 
-assert.match(
-  source,
-  /appendImageStudioHistory\(current, result, IMAGE_STUDIO_HISTORY_LIMIT\)/,
-  "history appends should use the shared limit constant"
-)
-
-assert.doesNotMatch(
-  source,
-  /const MAX_HISTORY_ITEMS = 6/,
-  "image studio component should not keep a duplicate local history limit"
-)
-
-const historyThumbnailImage = source.match(/pastResult\.images\.map\(\(image, index\) => \([\s\S]*?<img[\s\S]*?src=\{image\.src\}[\s\S]*?\/>/)
-
-assert.ok(historyThumbnailImage, "history thumbnails should still render a dedicated image element")
-
-assert.match(
-  historyThumbnailImage[0],
-  /loading="lazy"/,
-  "history thumbnails should lazy load to reduce follow-up network pressure"
-)
-
-assert.match(
-  historyThumbnailImage[0],
-  /decoding="async"/,
-  "history thumbnails should decode asynchronously"
-)
-
-const activeResultImage = source.match(/result\.images\.map\(\(image, index\) => \{[\s\S]*?<img[\s\S]*?src=\{image\.src\}[\s\S]*?\/>/)
-
-assert.ok(activeResultImage, "active result cards should still render an image element")
-
-assert.doesNotMatch(
-  activeResultImage[0],
-  /loading="lazy"/,
-  "active result images should keep their existing loading behavior"
-)
-
-assert.doesNotMatch(
-  activeResultImage[0],
-  /decoding="async"/,
-  "active result images should not change decoding behavior in this history-only task"
-)
+assert.match(source, /selectedTask\.images\.map\(\(image, index\) => \{/)

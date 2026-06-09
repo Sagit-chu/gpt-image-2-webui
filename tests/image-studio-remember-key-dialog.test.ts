@@ -19,7 +19,7 @@ assert.match(
 assert.match(
   source,
   /if \(promptToRememberApiKey\(\)\) \{\s*return\s*\}/,
-  "submitting with an unsaved API key should show the remember prompt before starting generation"
+  "submitting with an unsaved API key should show the remember prompt before enqueuing generation"
 )
 
 assert.match(

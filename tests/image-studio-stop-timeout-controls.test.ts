@@ -12,18 +12,24 @@ assert.match(
 
 assert.match(
   source,
-  /new AbortController\(\)/,
-  "image studio should create an AbortController for each generation run"
+  /taskAbortControllersRef\.current\.set\(taskId, taskController\)/,
+  "image studio should key each running task AbortController by task id"
 )
 
 assert.match(
   source,
-  /runImageStudioSession(?:<[^>]+>)?\(\{[\s\S]*signal:\s*generationController\.signal,[\s\S]*timeoutMs:\s*requestTimeoutMs,[\s\S]*\}\)/,
-  "image studio should pass the generation abort signal and timeout through the shared session helper"
+  /taskTimeoutsRef\.current\.set\(taskId, timeoutId\)/,
+  "image studio should key each running task timeout by task id"
 )
 
 assert.match(
   source,
-  /text\.stopGeneration/,
-  "the UI should expose localized copy for stopping an in-flight generation"
+  /runImageStudioSession(?:<[^>]+>)?\(\{[\s\S]*signal:\s*taskController\.signal,[\s\S]*timeoutMs:\s*task\.snapshot\.timeoutMs,[\s\S]*\}\)/,
+  "image studio should pass the task abort signal and task snapshot timeout through the shared session helper"
+)
+
+assert.match(
+  source,
+  /function stopTask\(taskId: string\)/,
+  "the UI should stop in-flight generations by task id"
 )
